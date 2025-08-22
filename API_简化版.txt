@@ -1,0 +1,33 @@
+# 资产管理系统 API 简化使用说明
+
+
+
+## API 命令示例
+
+### 获取所有资产
+curl http://localhost:3000/api/assets
+
+### 添加加密货币
+curl -X POST http://localhost:3000/api/assets/crypto -H "Content-Type: application/json" -d '{"name":"比特币","price":68400,"quantity":0.5}'
+
+### 添加股票
+curl -X POST http://localhost:3000/api/assets/stocks -H "Content-Type: application/json" -d '{"name":"苹果公司","price":150,"quantity":100}'
+
+### 更新加密货币价格
+curl -X PUT http://localhost:3000/api/assets/crypto/ID -H "Content-Type: application/json" -d '{"price":69000}'
+
+### 更新股票价格
+curl -X PUT http://localhost:3000/api/assets/stocks/ID -H "Content-Type: application/json" -d '{"price":160}'
+
+### 更新加密货币持仓数量
+curl -X PUT http://localhost:3000/api/assets/crypto/ID -H "Content-Type: application/json" -d '{"quantity":1.2}'
+
+### 更新股票持仓数量
+curl -X PUT http://localhost:3000/api/assets/stocks/ID -H "Content-Type: application/json" -d '{"quantity":200}'
+
+### 命令示范例子
+{
+  "combined_command": "curl -X PUT http://localhost:3000/api/assets/crypto/1754209090358 -H \"Content-Type: application/json\" -d '{\"quantity\":0.562800}' && curl -X PUT http://localhost:3000/api/assets/crypto/1754209168031 -H \"Content-Type: application/json\" -d '{\"quantity\":8.925385}' && curl -X PUT http://localhost:3000/api/assets/crypto/1754209212223 -H \"Content-Type: application/json\" -d '{\"quantity\":15.565000}' && curl -X PUT http://localhost:3000/api/assets/crypto/1754209190982 -H \"Content-Type: application/json\" -d '{\"quantity\":69.230500}'"
+}
+
+

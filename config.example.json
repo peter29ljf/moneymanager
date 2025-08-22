@@ -1,0 +1,7 @@
+{
+  "api_key": "your_bitget_api_key_here",
+  "secret_key": "your_bitget_secret_key_here",
+  "passphrase": "your_bitget_passphrase_here",
+  "sandbox": false,
+  "comment": "Copy this file to config.json and fill in your actual Bitget API credentials"
+}

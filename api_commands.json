@@ -1,0 +1,37 @@
+{
+  "commands": [
+    {
+      "name": "获取所有资产",
+      "code": "curl http://localhost:3000/api/assets"
+    },
+    {
+      "name": "添加加密货币",
+      "code": "curl -X POST http://localhost:3000/api/assets/crypto -H \"Content-Type: application/json\" -d '{\"name\":\"比特币\",\"price\":68400,\"quantity\":0.5}'"
+    },
+    {
+      "name": "添加股票",
+      "code": "curl -X POST http://localhost:3000/api/assets/stocks -H \"Content-Type: application/json\" -d '{\"name\":\"苹果公司\",\"price\":150,\"quantity\":100}'"
+    },
+    {
+      "name": "更新加密货币价格",
+      "code": "curl -X PUT http://localhost:3000/api/assets/crypto/资产ID -H \"Content-Type: application/json\" -d '{\"price\":69000}'"
+    },
+    {
+      "name": "更新股票价格",
+      "code": "curl -X PUT http://localhost:3000/api/assets/stocks/资产ID -H \"Content-Type: application/json\" -d '{\"price\":160}'"
+    },
+    {
+      "name": "更新加密货币持仓数量",
+      "code": "curl -X PUT http://localhost:3000/api/assets/crypto/资产ID -H \"Content-Type: application/json\" -d '{\"quantity\":1.2}'"
+    },
+    {
+      "name": "更新股票持仓数量",
+      "code": "curl -X PUT http://localhost:3000/api/assets/stocks/资产ID -H \"Content-Type: application/json\" -d '{\"quantity\":200}'"
+    }
+  ],
+  "说明": {
+    "服务器地址": "http://localhost:3000",
+    "数据存储": "assets.json",
+    "注意事项": "替换'资产ID'为实际的资产ID"
+  }
+} 
