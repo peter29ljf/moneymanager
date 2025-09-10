@@ -1,499 +1,236 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>资产管理系统</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f5f5f5;
-            padding: 20px;
-        }
-        
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            padding: 30px;
-        }
-        
-        h1 {
-            text-align: center;
-            color: #333;
-            margin-bottom: 30px;
-        }
-        
-        .summary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 20px;
-            border-radius: 10px;
-            margin-bottom: 30px;
-            text-align: center;
-        }
-        
-        .summary h2 {
-            margin-bottom: 10px;
-        }
-        
-        .summary-row {
-            display: flex;
-            justify-content: space-around;
-            margin-top: 15px;
-        }
-        
-        .summary-item {
-            text-align: center;
-        }
-        
-        .summary-item span {
-            display: block;
-            font-size: 0.9em;
-            opacity: 0.8;
-        }
-        
-        .summary-item strong {
-            font-size: 1.5em;
-        }
-        
-        .control-panel {
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 15px;
-        }
-        
-        .trading-switch {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .switch {
-            position: relative;
-            display: inline-block;
-            width: 60px;
-            height: 34px;
-        }
-        
-        .switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
-        
-        .slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: #ccc;
-            transition: .4s;
-            border-radius: 34px;
-        }
-        
-        .slider:before {
-            position: absolute;
-            content: "";
-            height: 26px;
-            width: 26px;
-            left: 4px;
-            bottom: 4px;
-            background-color: white;
-            transition: .4s;
-            border-radius: 50%;
-        }
-        
-        input:checked + .slider {
-            background-color: #28a745;
-        }
-        
-        input:checked + .slider:before {
-            transform: translateX(26px);
-        }
-        
-        .price-update {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
-        
-        .tabs {
-            display: flex;
-            margin-bottom: 20px;
-            border-bottom: 2px solid #eee;
-        }
-        
-        .tab {
-            padding: 15px 30px;
-            cursor: pointer;
-            border: none;
-            background: none;
-            font-size: 16px;
-            color: #666;
-            border-bottom: 3px solid transparent;
-            transition: all 0.3s;
-        }
-        
-        .tab.active {
-            color: #667eea;
-            border-bottom-color: #667eea;
-        }
-        
-        .tab-content {
-            display: none;
-        }
-        
-        .tab-content.active {
-            display: block;
-        }
-        
-        .asset-form {
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 30px;
-        }
-        
-        .form-row {
-            display: flex;
-            gap: 15px;
-            margin-bottom: 15px;
-        }
-        
-        .form-group {
-            flex: 1;
-        }
-        
-        .form-group label {
-            display: block;
-            margin-bottom: 5px;
-            color: #333;
-            font-weight: 500;
-        }
-        
-        .form-group input {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            font-size: 14px;
-        }
-        
-        .btn {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: background-color 0.3s;
-        }
-        
-        .btn-primary {
-            background-color: #667eea;
-            color: white;
-        }
-        
-        .btn-primary:hover {
-            background-color: #5a6fd8;
-        }
-        
-        .btn-danger {
-            background-color: #dc3545;
-            color: white;
-        }
-        
-        .btn-danger:hover {
-            background-color: #c82333;
-        }
-        
-        .btn-edit {
-            background-color: #28a745;
-            color: white;
-            padding: 5px 10px;
-            font-size: 12px;
-            margin-right: 5px;
-        }
-        
-        .btn-edit:hover {
-            background-color: #218838;
-        }
-        
-        .btn-refresh {
-            background-color: #17a2b8;
-            color: white;
-        }
-        
-        .btn-refresh:hover {
-            background-color: #138496;
-        }
-        
-        .btn-refresh:disabled {
-            background-color: #6c757d;
-            cursor: not-allowed;
-        }
-        
-        .asset-list {
-            margin-top: 20px;
-        }
-        
-        .asset-item {
-            background: white;
-            border: 1px solid #eee;
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 15px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .asset-info {
-            flex: 1;
-        }
-        
-        .asset-name {
-            font-size: 18px;
-            font-weight: bold;
-            color: #333;
-            margin-bottom: 5px;
-        }
-        
-        .asset-details {
-            color: #666;
-            font-size: 14px;
-        }
-        
-        .asset-value {
-            text-align: right;
-            color: #667eea;
-            font-weight: bold;
-            font-size: 18px;
-        }
-        
-        .asset-actions {
-            margin-left: 20px;
-        }
-        
-        .loading {
-            text-align: center;
-            color: #666;
-            padding: 20px;
-        }
-        
-        .trading-log {
-            max-height: 400px;
-            overflow-y: auto;
-            border: 1px solid #eee;
-            border-radius: 8px;
-            padding: 20px;
-        }
-        
-        .log-item {
-            padding: 10px;
-            border-bottom: 1px solid #f0f0f0;
-            margin-bottom: 10px;
-        }
-        
-        .log-item:last-child {
-            border-bottom: none;
-            margin-bottom: 0;
-        }
-        
-        .log-timestamp {
-            color: #666;
-            font-size: 12px;
-        }
-        
-        .log-action {
-            font-weight: bold;
-            margin: 5px 0;
-        }
-        
-        .log-details {
-            color: #333;
-            font-size: 14px;
-        }
-        
-        .log-success {
-            color: #28a745;
-        }
-        
-        .log-error {
-            color: #dc3545;
-        }
-        
-        .status-indicator {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            margin-right: 8px;
-        }
-        
-        .status-active {
-            background-color: #28a745;
-        }
-        
-        .status-inactive {
-            background-color: #dc3545;
-        }
-        
-        .update-status {
-            padding: 10px;
-            border-radius: 5px;
-            margin: 10px 0;
-            display: none;
-        }
-        
-        .update-success {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        
-        .update-error {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>资产管理系统</title>
+<style>
+:root{
+  --bg:#f6f7fb; --card:#fff; --text:#1f2937; --muted:#6b7280;
+  --primary:#4f46e5; --primary-2:#6366f1; --green:#16a34a; --red:#dc2626;
+  --radius:12px; --sp-1:8px; --sp-2:12px; --sp-3:16px; --sp-4:24px; --sp-5:32px;
+}
+*{box-sizing:border-box} html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto}
+.container{max-width:1200px;margin:auto;padding:var(--sp-5)}
+.header{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--sp-4)}
+h1{font-size:24px;margin:0}
+.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--sp-3);margin-bottom:var(--sp-4)}
+.card{background:var(--card);border-radius:var(--radius);box-shadow:0 6px 18px rgba(0,0,0,.06);padding:var(--sp-4)}
+.metric-title{color:var(--muted);font-size:12px;margin-bottom:6px}
+.metric-val{font-size:22px;font-weight:700}
+.toolbar{display:flex;gap:var(--sp-2);flex-wrap:wrap;margin-bottom:var(--sp-3)}
+.btn{border:0;border-radius:10px;padding:10px 14px;background:#e5e7eb;color:#111;cursor:pointer}
+.btn-primary{background:var(--primary);color:#fff}
+.btn-refresh{background:#10b981;color:#fff}
+.tabs{display:flex;gap:var(--sp-2);margin:var(--sp-3) 0}
+.tab{background:transparent;border:0;border-bottom:2px solid transparent;padding:10px 14px;color:var(--muted);cursor:pointer}
+.tab.active{color:var(--primary);border-bottom-color:var(--primary)}
+.section{display:none}
+.section.active{display:block}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-3)}
+.asset-row{display:flex;align-items:center;justify-content:space-between;border:1px solid #eef0f4;border-radius:10px;padding:12px;margin-bottom:10px;background:#fff}
+.asset-info{font-size:14px}
+.asset-actions .btn{padding:6px 10px}
+.label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+.select,input{width:100%;padding:10px;border:1px solid #e5e7eb;border-radius:10px;background:#fff}
+.kv{display:grid;grid-template-columns:160px 1fr;gap:var(--sp-2)}
+.muted{color:var(--muted)}
+.update-status{display:none;margin-top:10px;padding:10px;border-radius:8px}
+.update-success{display:block;background:#eafff3;color:#065f46}
+.update-error{display:block;background:#fff1f2;color:#9f1239}
+.modal-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center}
+.modal{background:white;border-radius:12px;padding:24px;max-width:520px;width:90%;max-height:80vh;overflow-y:auto}
+.modal-header{font-size:18px;font-weight:700;margin-bottom:16px}
+.modal-body{margin-bottom:16px}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end}
+.form-group{margin-bottom:12px}
+.form-group label{display:block;margin-bottom:6px;font-weight:500}
+.form-group input,.form-group select{width:100%;padding:8px 12px;border:1px solid #d1d5db;border-radius:6px}
+.input-inline{display:flex;gap:8px;align-items:center}
+.input-inline input{flex:1}
+.search-results{max-height:200px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:6px;margin-top:8px}
+.search-item{padding:10px;border-bottom:1px solid #f3f4f6;cursor:pointer}
+.search-item:hover{background:#f9fafb}
+.search-item:last-child{border-bottom:none}
+.loading{color:var(--muted);text-align:center;padding:20px}
+.asset-item{display:flex;align-items:center;justify-content:space-between;padding:12px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:8px}
+.asset-name{font-weight:600;margin-bottom:4px}
+.asset-details{font-size:12px;color:var(--muted)}
+.asset-value{font-weight:700;color:var(--primary)}
+.asset-actions{display:flex;gap:6px}
+.btn-edit{background:#f59e0b;color:white}
+.btn-danger{background:#dc2626;color:white}
+@media (max-width:960px){
+  .summary{grid-template-columns:1fr}
+  .grid-2{grid-template-columns:1fr}
+}
+</style>
 </head>
 <body>
-    <div class="container">
-        <h1>个人资产管理系统</h1>
-        
-        <div class="summary">
-            <h2>资产总览</h2>
-            <div class="summary-row">
-                <div class="summary-item">
-                    <span>加密货币总值</span>
-                    <strong id="crypto-total">$0.00</strong>
-                </div>
-                <div class="summary-item">
-                    <span>股票总值</span>
-                    <strong id="stocks-total">$0.00</strong>
-                </div>
-                <div class="summary-item">
-                    <span>总资产</span>
-                    <strong id="total-value">$0.00</strong>
-                </div>
-            </div>
+<div class="container">
+  <div class="header">
+    <h1>个人资产管理系统</h1>
+    <div class="toolbar">
+      <button id="btn-new-group" class="btn btn-primary">新建资产组</button>
+      <button id="refresh-group-prices" class="btn btn-refresh">刷新当前组价格</button>
+    </div>
+  </div>
+
+  <div class="summary">
+    <div class="card">
+      <div class="metric-title">加密货币总值</div>
+      <div class="metric-val" id="crypto-total">$0.00</div>
+    </div>
+    <div class="card">
+      <div class="metric-title">股票总值</div>
+      <div class="metric-val" id="stocks-total">$0.00</div>
+    </div>
+    <div class="card">
+      <div class="metric-title">资产总值</div>
+      <div class="metric-val" id="total-value">$0.00</div>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('groups', this)">资产组</button>
+    <button class="tab" onclick="switchTab('strategy', this)">策略设置</button>
+    <button class="tab" onclick="switchTab('bitget', this)">Bitget设置</button>
+    <button class="tab" onclick="switchTab('trading-log', this)">交易记录</button>
+  </div>
+
+  <div id="update-status" class="update-status"></div>
+
+  <!-- 资产组 -->
+  <div id="groups-tab" class="section active">
+    <div class="card">
+      <div class="grid-2">
+        <div>
+          <label class="label">当前资产组</label>
+          <select id="group-selector" class="select"></select>
         </div>
-        
-        <div class="control-panel">
-            <div class="trading-switch">
-                <span>自动交易开关:</span>
-                <label class="switch">
-                    <input type="checkbox" id="trading-toggle">
-                    <span class="slider"></span>
-                </label>
-                <span id="trading-status">已关闭</span>
-            </div>
-            
-            <div class="price-update">
-                <button id="refresh-crypto-prices" class="btn btn-refresh">刷新加密货币价格</button>
-                <button id="refresh-stock-prices" class="btn btn-refresh">刷新股票价格</button>
-            </div>
+        <div style="display:flex;align-items:flex-end;gap:10px">
+          <button id="btn-add-asset" class="btn btn-primary">添加资产</button>
+          <button id="btn-delete-group" class="btn">删除资产组</button>
         </div>
-        
-        <div id="update-status" class="update-status"></div>
-        
-        <div class="tabs">
-            <button class="tab active" onclick="switchTab('crypto')">加密货币</button>
-            <button class="tab" onclick="switchTab('stocks')">股票</button>
-            <button class="tab" onclick="switchTab('trading-log')">交易记录</button>
+      </div>
+    </div>
+    <div class="grid-2" style="margin-top:16px">
+      <div class="card">
+        <h3 style="margin:0 0 12px">资产列表</h3>
+        <div id="group-assets"></div>
+      </div>
+      <div class="card">
+        <h3 style="margin:0 0 12px">资产组占比</h3>
+        <div id="group-summary" class="kv"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 策略设置 -->
+  <div id="strategy-tab" class="section">
+    <div class="card">
+      <div class="grid-2">
+        <div>
+          <label class="label">选择资产组</label>
+          <select id="strategy-group-selector" class="select"></select>
         </div>
-        
-        <div id="crypto-tab" class="tab-content active">
-            <div class="asset-form">
-                <h3>添加加密货币</h3>
-                <form id="crypto-form">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="crypto-name">名称</label>
-                            <input type="text" id="crypto-name" placeholder="例: 比特币" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="crypto-price">价格 ($)</label>
-                            <input type="number" id="crypto-price" placeholder="0.00" step="0.01" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="crypto-quantity">数量</label>
-                            <input type="number" id="crypto-quantity" placeholder="0.00" step="0.00001" required>
-                        </div>
-                        <div class="form-group">
-                            <label>&nbsp;</label>
-                            <button type="submit" class="btn btn-primary">添加</button>
-                        </div>
-                    </div>
-                </form>
-            </div>
-            
-            <div class="asset-list">
-                <h3>加密货币持仓</h3>
-                <div id="crypto-list"></div>
-            </div>
+        <div class="grid-2">
+          <div>
+            <label class="label">频率单位</label>
+            <select id="strategy-frequency-unit" class="select">
+              <option value="minute">分钟</option>
+              <option value="hour" selected>小时</option>
+              <option value="day">天</option>
+              <option value="week">星期</option>
+            </select>
+          </div>
+          <div>
+            <label class="label">频率值</label>
+            <input id="strategy-frequency-value" type="number" min="1" value="1" class="select"/>
+          </div>
         </div>
-        
-        <div id="stocks-tab" class="tab-content">
-            <div class="asset-form">
-                <h3>添加股票</h3>
-                <form id="stocks-form">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="stock-name">名称</label>
-                            <input type="text" id="stock-name" placeholder="例: 苹果公司" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="stock-price">价格 ($)</label>
-                            <input type="number" id="stock-price" placeholder="0.00" step="0.01" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="stock-quantity">股数</label>
-                            <input type="number" id="stock-quantity" placeholder="0" step="1" required>
-                        </div>
-                        <div class="form-group">
-                            <label>&nbsp;</label>
-                            <button type="submit" class="btn btn-primary">添加</button>
-                        </div>
-                    </div>
-                </form>
-            </div>
-            
-            <div class="asset-list">
-                <h3>股票持仓</h3>
-                <div id="stocks-list"></div>
-            </div>
+      </div>
+      <div class="grid-2" style="margin-top:16px">
+        <div>
+          <label class="label">最小交易额(USDT)</label>
+          <input id="strategy-min-trade" type="number" min="1" value="100" class="select"/>
         </div>
-        
-        <div id="trading-log-tab" class="tab-content">
-            <div class="trading-log">
-                <h3>交易记录</h3>
-                <div id="trading-log-content">
-                    <div class="loading">加载交易记录中...</div>
-                </div>
-            </div>
+        <div>
+          <label class="label">最大交易额(USDT)</label>
+          <input id="strategy-max-trade" type="number" min="1" value="1000" class="select"/>
         </div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:16px">
+        <button id="strategy-save" class="btn btn-primary">保存设置</button>
+        <button id="strategy-enable" class="btn">开启策略</button>
+        <button id="strategy-disable" class="btn">关闭策略</button>
+        <button id="strategy-refresh-now" class="btn btn-refresh">立即刷新</button>
+      </div>
+      <div id="strategy-status" class="muted" style="margin-top:10px">未加载</div>
     </div>
 
-    <script src="config.js"></script>
-    <script src="app.js"></script>
+    <div class="card" style="margin-top:16px">
+      <h3 style="margin:0 0 10px">最近一次刷新结果</h3>
+      <div id="strategy-last-result"></div>
+    </div>
+  </div>
+
+  <!-- Bitget 设置 -->
+  <div id="bitget-tab" class="section">
+    <div class="card">
+      <h3 style="margin:0 0 12px">Bitget 设置</h3>
+      <div class="grid-2">
+        <div><label class="label">API Key</label><input id="bitget-api-key" class="select" placeholder="***"></div>
+        <div><label class="label">Secret Key</label><input id="bitget-secret-key" class="select" type="password" placeholder="********"></div>
+      </div>
+      <div class="grid-2" style="margin-top:16px">
+        <div><label class="label">Passphrase</label><input id="bitget-passphrase" class="select" type="password" placeholder="********"></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:22px">
+          <input id="bitget-sandbox" type="checkbox"> <span class="muted">Sandbox(测试环境)</span>
+        </div>
+      </div>
+      <div style="margin-top:16px"><button id="bitget-save" class="btn btn-primary">保存配置</button></div>
+      <div id="bitget-config-status" class="muted" style="margin-top:8px">未加载(敏感信息已隐藏)</div>
+      <div class="card" style="margin-top:16px;background:#fafafa">
+        <h4 style="margin:0 0 8px">当前配置（已局部隐藏）</h4>
+        <div id="bitget-config-summary" class="kv"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 交易记录 -->
+  <div id="trading-log-tab" class="section">
+    <div class="card">
+      <h3 style="margin:0 0 10px">资产变动统计</h3>
+      <div id="portfolio-stats" class="kv" style="margin-bottom:12px"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <h3 style="margin:0">交易记录</h3>
+        <div style="display:flex;gap:8px">
+          <button id="refresh-logs" class="btn">刷新记录</button>
+          <button id="clear-logs" class="btn" style="background:#dc2626;color:#fff">清空记录</button>
+        </div>
+      </div>
+      <div id="trading-log-content">
+        <div class="muted">加载交易记录中...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 向导 -->
+<div id="wizard-overlay" class="modal-overlay" style="display:none">
+  <div class="modal">
+    <div class="modal-header" id="wizard-title">添加资产到资产组</div>
+    <div class="modal-body" id="wizard-body"></div>
+    <div class="modal-actions">
+      <button id="wizard-cancel" class="btn">取消</button>
+      <button id="wizard-back" class="btn" style="display:none">上一步</button>
+      <button id="wizard-next" class="btn btn-primary">下一步</button>
+    </div>
+  </div>
+</div>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

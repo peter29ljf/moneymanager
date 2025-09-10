@@ -1,0 +1,140 @@
+{
+  "资产组管理API示例": [
+    {
+      "name": "获取所有资产组",
+      "method": "GET",
+      "url": "/api/groups",
+      "command": "curl http://localhost:3000/api/groups"
+    },
+    {
+      "name": "创建新资产组",
+      "method": "POST",
+      "url": "/api/groups",
+      "command": "curl -X POST http://localhost:3000/api/groups -H \"Content-Type: application/json\" -d '{\"name\":\"我的投资组合\"}'"
+    },
+    {
+      "name": "删除资产组",
+      "method": "DELETE",
+      "url": "/api/groups/:groupId",
+      "command": "curl -X DELETE http://localhost:3000/api/groups/group_1"
+    },
+    {
+      "name": "添加资产到资产组",
+      "method": "POST",
+      "url": "/api/groups/:groupId/assets",
+      "command": "curl -X POST http://localhost:3000/api/groups/group_1/assets -H \"Content-Type: application/json\" -d '{\"name\":\"BTC\",\"symbol\":\"BTCUSDT\",\"quantity\":0.1,\"price\":68000}'"
+    },
+    {
+      "name": "更新资产信息",
+      "method": "PUT",
+      "url": "/api/groups/:groupId/assets/:assetId",
+      "command": "curl -X PUT http://localhost:3000/api/groups/group_1/assets/asset_1 -H \"Content-Type: application/json\" -d '{\"quantity\":0.2,\"price\":69000}'"
+    },
+    {
+      "name": "删除资产",
+      "method": "DELETE",
+      "url": "/api/groups/:groupId/assets/:assetId",
+      "command": "curl -X DELETE http://localhost:3000/api/groups/group_1/assets/asset_1"
+    },
+    {
+      "name": "刷新资产组价格",
+      "method": "POST",
+      "url": "/api/groups/:groupId/refresh-prices",
+      "command": "curl -X POST http://localhost:3000/api/groups/group_1/refresh-prices"
+    }
+  ],
+  
+  "策略交易API示例": [
+    {
+      "name": "获取策略配置",
+      "method": "GET",
+      "url": "/api/groups/:groupId/strategy",
+      "command": "curl http://localhost:3000/api/groups/group_1/strategy"
+    },
+    {
+      "name": "更新策略配置",
+      "method": "PUT",
+      "url": "/api/groups/:groupId/strategy",
+      "command": "curl -X PUT http://localhost:3000/api/groups/group_1/strategy -H \"Content-Type: application/json\" -d '{\"enabled\":false,\"rebalanceThreshold\":0.05,\"targets\":{\"BTC\":0.6,\"ETH\":0.4}}'"
+    },
+    {
+      "name": "启用策略",
+      "method": "POST",
+      "url": "/api/groups/:groupId/strategy/enable",
+      "command": "curl -X POST http://localhost:3000/api/groups/group_1/strategy/enable"
+    },
+    {
+      "name": "禁用策略",
+      "method": "POST",
+      "url": "/api/groups/:groupId/strategy/disable",
+      "command": "curl -X POST http://localhost:3000/api/groups/group_1/strategy/disable"
+    },
+    {
+      "name": "执行再平衡",
+      "method": "POST",
+      "url": "/api/groups/:groupId/strategy/rebalance",
+      "command": "curl -X POST http://localhost:3000/api/groups/group_1/strategy/rebalance"
+    }
+  ],
+
+  "Bitget API示例": [
+    {
+      "name": "搜索合约",
+      "method": "GET",
+      "url": "/api/bitget/search",
+      "command": "curl \"http://localhost:3000/api/bitget/search?query=BTC&limit=5\""
+    },
+    {
+      "name": "获取API配置",
+      "method": "GET",
+      "url": "/api/bitget/config",
+      "command": "curl http://localhost:3000/api/bitget/config"
+    },
+    {
+      "name": "更新API配置",
+      "method": "PUT",
+      "url": "/api/bitget/config",
+      "command": "curl -X PUT http://localhost:3000/api/bitget/config -H \"Content-Type: application/json\" -d '{\"apiKey\":\"your_key\",\"secretKey\":\"your_secret\",\"passphrase\":\"your_passphrase\",\"sandbox\":false}'"
+    },
+    {
+      "name": "手动执行交易",
+      "method": "POST",
+      "url": "/api/trade/manual",
+      "command": "curl -X POST http://localhost:3000/api/trade/manual -H \"Content-Type: application/json\" -d '{\"symbolOrCoin\":\"BTCUSDT\",\"side\":\"buy\",\"usdt\":100,\"marginMode\":\"isolated\"}'"
+    }
+  ],
+
+  "交易记录API示例": [
+    {
+      "name": "获取交易日志",
+      "method": "GET",
+      "url": "/api/trading/logs",
+      "command": "curl http://localhost:3000/api/trading/logs"
+    },
+    {
+      "name": "清空交易日志",
+      "method": "POST",
+      "url": "/api/trading/logs/clear",
+      "command": "curl -X POST http://localhost:3000/api/trading/logs/clear"
+    },
+    {
+      "name": "获取策略状态",
+      "method": "GET",
+      "url": "/api/strategy/status",
+      "command": "curl http://localhost:3000/api/strategy/status"
+    }
+  ],
+
+  "系统信息": {
+    "服务器地址": "http://localhost:3000",
+    "数据存储": "assets.json (资产组数据), trading_logs.json (交易记录)",
+    "配置文件": "config.json (Bitget API), bitget_config.json (Web配置)",
+    "缓存文件": "bitget_contracts_cache.json (合约信息缓存)",
+    "注意事项": [
+      "替换 :groupId 为实际的资产组ID",
+      "替换 :assetId 为实际的资产ID", 
+      "API密钥需要在Web界面或配置文件中设置",
+      "交易功能需要有效的Bitget API配置"
+    ]
+  }
+}

@@ -11,6 +11,7 @@ import time
 import json
 import requests
 import os
+import random
 from typing import Optional, Dict, Any
 import argparse
 from datetime import datetime
@@ -38,8 +39,15 @@ class BitgetAPI:
         self.sandbox = sandbox
         self.log_file = log_file
         
-        # 支持的币种配置
-        self.supported_symbols = {
+        # 合约交易对缓存 - 存储所有可用的合约信息
+        self.contracts_cache = {}  # symbol -> contract_info
+        self.contracts_loaded = False
+        
+        # 合约信息存储文件
+        self.contracts_cache_file = "bitget_contracts_cache.json"
+        
+        # 向后兼容的币种映射（已更新为正确的Bitget永续合约格式）
+        self.legacy_symbols = {
             "BTC": "BTCUSDT",
             "ETH": "ETHUSDT", 
             "BNB": "BNBUSDT",
@@ -50,11 +58,181 @@ class BitgetAPI:
             "LTC": "LTCUSDT",
             "DOT": "DOTUSDT",
             "MATIC": "MATICUSDT",
-            "LINK": "LINKUSDT"
+            "LINK": "LINKUSDT",
+            "TSLA": "TSLAUSDT",
+            "NVDA": "NVDAUSDT"
         }
         
         # 初始化日志文件
         self._init_log_file()
+        
+        # 预加载合约信息
+        self._load_contracts_cache()
+    
+    def _load_contracts_cache(self):
+        """加载合约信息缓存"""
+        try:
+            # 尝试从文件加载缓存
+            if os.path.exists(self.contracts_cache_file):
+                with open(self.contracts_cache_file, 'r', encoding='utf-8') as f:
+                    cache_data = json.load(f)
+                    # 检查缓存是否过期（24小时）
+                    cache_time = cache_data.get('cached_at', 0)
+                    if time.time() - cache_time < 24 * 3600:
+                        self.contracts_cache = cache_data.get('contracts', {})
+                        self.contracts_loaded = True
+                        print(f"📦 已加载 {len(self.contracts_cache)} 个合约缓存")
+                        return
+            
+            # 缓存不存在或已过期，从API获取
+            print("🔄 正在获取最新合约信息...")
+            self._refresh_contracts_cache()
+            
+        except Exception as e:
+            print(f"⚠️ 加载合约缓存失败: {str(e)}")
+            # 使用备用方案
+            self.contracts_cache = {}
+            self.contracts_loaded = False
+    
+    def _refresh_contracts_cache(self):
+        """刷新合约信息缓存"""
+        try:
+            # 获取USDT永续合约
+            url = f"{self.base_url}/api/v2/mix/market/contracts?productType=USDT-FUTURES"
+            response = requests.get(url, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('code') == '00000':
+                    contracts = data.get('data', [])
+                    
+                    # 处理合约数据
+                    self.contracts_cache = {}
+                    for contract in contracts:
+                        symbol = contract.get('symbol', '')
+                        if symbol:
+                            # 存储完整的合约信息
+                            self.contracts_cache[symbol] = {
+                                'symbol': symbol,
+                                'baseCoin': contract.get('baseCoin', ''),
+                                'quoteCoin': contract.get('quoteCoin', ''),
+                                'minTradeNum': contract.get('minTradeNum', '0'),
+                                'priceEndStep': contract.get('priceEndStep', '0'),
+                                'volumePlace': contract.get('volumePlace', 0),
+                                'pricePlace': contract.get('pricePlace', 0),
+                                'sizeMultiplier': contract.get('sizeMultiplier', '1'),
+                                'minTradeUSDT': contract.get('minTradeUSDT', '0'),
+                                'maxTradeUSDT': contract.get('maxTradeUSDT', '0'),
+                                'openCostUpRate': contract.get('openCostUpRate', '0'),
+                                'supportMarginCoins': contract.get('supportMarginCoins', []),
+                                'offTime': contract.get('offTime', ''),
+                                'limitOpenTime': contract.get('limitOpenTime', ''),
+                                'deliveryTime': contract.get('deliveryTime', ''),
+                                'deliveryStartTime': contract.get('deliveryStartTime', ''),
+                                'launchTime': contract.get('launchTime', ''),
+                                'fundingTime': contract.get('fundingTime', ''),
+                                'minLever': contract.get('minLever', '1'),
+                                'maxLever': contract.get('maxLever', '125'),
+                                'posLimit': contract.get('posLimit', '0'),
+                                'maintainTime': contract.get('maintainTime', '')
+                            }
+                    
+                    # 保存到文件
+                    cache_data = {
+                        'cached_at': time.time(),
+                        'contracts': self.contracts_cache
+                    }
+                    
+                    with open(self.contracts_cache_file, 'w', encoding='utf-8') as f:
+                        json.dump(cache_data, f, indent=2, ensure_ascii=False)
+                    
+                    self.contracts_loaded = True
+                    print(f"✅ 已缓存 {len(self.contracts_cache)} 个合约信息")
+                else:
+                    raise Exception(f"API错误: {data.get('msg', '未知错误')}")
+            else:
+                raise Exception(f"HTTP错误: {response.status_code}")
+                
+        except Exception as e:
+            print(f"❌ 刷新合约缓存失败: {str(e)}")
+            self.contracts_loaded = False
+    
+    def search_contracts(self, query: str, limit: int = 20) -> list:
+        """
+        搜索合约交易对
+        
+        Args:
+            query: 搜索关键字
+            limit: 返回结果数量限制
+            
+        Returns:
+            匹配的合约列表
+        """
+        if not self.contracts_loaded:
+            self._refresh_contracts_cache()
+        
+        if not self.contracts_cache:
+            return []
+        
+        query = query.upper().strip()
+        matches = []
+        
+        for symbol, contract in self.contracts_cache.items():
+            # 搜索逻辑：symbol、baseCoin、quoteCoin 中包含查询词
+            symbol_upper = symbol.upper()
+            base_coin = contract.get('baseCoin', '').upper()
+            quote_coin = contract.get('quoteCoin', '').upper()
+            
+            if (query in symbol_upper or 
+                query in base_coin or 
+                query in quote_coin):
+                
+                matches.append({
+                    'symbol': symbol,
+                    'baseCoin': contract.get('baseCoin', ''),
+                    'quoteCoin': contract.get('quoteCoin', ''),
+                    'displayName': f"{contract.get('baseCoin', '')}/{contract.get('quoteCoin', '')} 永续 ({symbol})",
+                    'minTradeNum': contract.get('minTradeNum', '0'),
+                    'pricePlace': contract.get('pricePlace', 0),
+                    'volumePlace': contract.get('volumePlace', 0),
+                    'minTradeUSDT': contract.get('minTradeUSDT', '0'),
+                    'maxLever': contract.get('maxLever', '125'),
+                    'contractInfo': contract  # 完整合约信息
+                })
+        
+        # 按相关性排序（完全匹配优先）
+        def sort_key(item):
+            symbol = item['symbol'].upper()
+            base_coin = item['baseCoin'].upper()
+            
+            if symbol == query:
+                return 0  # 完全匹配symbol
+            elif base_coin == query:
+                return 1  # 完全匹配baseCoin
+            elif symbol.startswith(query):
+                return 2  # symbol开头匹配
+            elif base_coin.startswith(query):
+                return 3  # baseCoin开头匹配
+            else:
+                return 4  # 其他包含匹配
+        
+        matches.sort(key=sort_key)
+        return matches[:limit]
+    
+    def get_contract_info(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """
+        获取指定交易对的合约信息
+        
+        Args:
+            symbol: 交易对符号
+            
+        Returns:
+            合约信息字典，如果不存在返回None
+        """
+        if not self.contracts_loaded:
+            self._refresh_contracts_cache()
+        
+        return self.contracts_cache.get(symbol)
     
     def _init_log_file(self):
         """初始化交易日志文件"""
@@ -286,17 +464,48 @@ class BitgetAPI:
         }
     
     def _get_symbol(self, coin: str) -> str:
-        """获取交易对符号"""
-        coin_upper = coin.upper()
-        if coin_upper in self.supported_symbols:
-            return self.supported_symbols[coin_upper]
-        elif coin_upper.endswith("USDT"):
+        """
+        获取交易对符号 - 新版本支持完整合约信息
+        
+        Args:
+            coin: 币种符号或完整交易对
+            
+        Returns:
+            有效的交易对符号
+        """
+        coin_upper = coin.upper().strip()
+        
+        # 1. 直接检查是否为有效的合约符号
+        if self.contracts_loaded and coin_upper in self.contracts_cache:
             return coin_upper
-        else:
-            raise ValueError(f"不支持的币种: {coin}. 支持的币种: {list(self.supported_symbols.keys())}")
+        
+        # 2. 检查向后兼容的映射
+        if coin_upper in self.legacy_symbols:
+            return self.legacy_symbols[coin_upper]
+        
+        # 3. 如果以USDT结尾，直接检查是否为有效的永续合约
+        if coin_upper.endswith("USDT"):
+            if self.contracts_loaded and coin_upper in self.contracts_cache:
+                return coin_upper
+            # 如果不是完整符号，但以USDT结尾，可能是现货，直接返回
+            return coin_upper
+        
+        # 4. 尝试搜索合约
+        if self.contracts_loaded:
+            matches = self.search_contracts(coin_upper, limit=1)
+            if matches:
+                return matches[0]['symbol']
+        
+        # 5. 最后尝试构造USDT永续合约符号
+        constructed_symbol = f"{coin_upper}USDT"
+        if self.contracts_loaded and constructed_symbol in self.contracts_cache:
+            return constructed_symbol
+        
+        # 如果都没有找到，抛出错误
+        raise ValueError(f"未找到币种: {coin}. 请使用完整的交易对符号（如BTCUSDT）或确保合约信息已加载")
     
     def place_market_order(self, coin: str, side: str, size: str, 
-                          margin_mode: str = "crossed") -> Dict[str, Any]:
+                          margin_mode: str = "isolated", leverage: str = "1") -> Dict[str, Any]:
         """
         下市价单
         
@@ -305,6 +514,7 @@ class BitgetAPI:
             side: 方向 (buy/sell)
             size: 数量
             margin_mode: 保证金模式 (crossed/isolated)
+            leverage: 杠杆倍数 (1-125)
         """
         symbol = self._get_symbol(coin)
         product_type = "SUSDT-FUTURES" if self.sandbox else "USDT-FUTURES"
@@ -316,15 +526,112 @@ class BitgetAPI:
             "marginCoin": "USDT",
             "size": str(size),
             "side": side,
-            "tradeSide": "open",
             "orderType": "market",
-            "clientOid": f"market_{int(time.time())}"
+            "clientOid": f"market_{int(time.time() * 1000)}_{random.randint(1000, 9999)}"
         }
+        
+        # 设置保证金模式和杠杆倍数
+        if margin_mode == "isolated":
+            print(f"🔄 设置 {symbol} 为逐仓模式...")
+            self._set_margin_mode(symbol, margin_mode)
+            
+        if leverage != "1":
+            print(f"🔄 设置 {symbol} 杠杆为 {leverage}x...")
+            self._set_leverage(symbol, margin_mode, leverage)
         
         return self._make_request("POST", "/api/v2/mix/order/place-order", order_data)
     
+    def place_market_order_with_contract_info(self, symbol: str, side: str, size: str, 
+                                            contract_info: Optional[Dict[str, Any]] = None,
+                                            margin_mode: str = "isolated", leverage: str = "1") -> Dict[str, Any]:
+        """
+        使用合约信息下市价单（推荐使用此方法）
+        
+        Args:
+            symbol: 完整的交易对符号 (如 BTCUSDT_UMCBL)
+            side: 方向 (buy/sell)
+            size: 数量
+            contract_info: 合约信息（如果提供则不需要查询）
+            margin_mode: 保证金模式 (crossed/isolated)
+            leverage: 杠杆倍数 (1-125)
+        """
+        product_type = "SUSDT-FUTURES" if self.sandbox else "USDT-FUTURES"
+        
+        # 获取合约信息
+        if contract_info is None:
+            contract_info = self.get_contract_info(symbol)
+            if not contract_info:
+                raise ValueError(f"未找到交易对 {symbol} 的合约信息")
+        
+        # 验证数量精度
+        volume_place = int(contract_info.get('volumePlace', 0))
+        min_trade_num = float(contract_info.get('minTradeNum', '0'))
+        
+        try:
+            size_float = float(size)
+            if size_float < min_trade_num:
+                raise ValueError(f"数量 {size} 小于最小交易数量 {min_trade_num}")
+            
+            # 调整精度
+            if volume_place > 0:
+                size = f"{size_float:.{volume_place}f}"
+            else:
+                size = str(int(size_float) if size_float == int(size_float) else size_float)
+                
+        except ValueError as e:
+            raise ValueError(f"无效的数量格式: {size}")
+        
+        order_data = {
+            "symbol": symbol,
+            "productType": product_type,
+            "marginMode": margin_mode,
+            "marginCoin": "USDT",
+            "size": size,
+            "side": side,
+            "orderType": "market",
+            "clientOid": f"market_{int(time.time() * 1000)}_{random.randint(1000, 9999)}"
+        }
+        
+        # 设置保证金模式和杠杆倍数
+        if margin_mode == "isolated":
+            print(f"🔄 设置 {symbol} 为逐仓模式...")
+            self._set_margin_mode(symbol, margin_mode)
+            
+        if leverage != "1":
+            print(f"🔄 设置 {symbol} 杠杆为 {leverage}x...")
+            self._set_leverage(symbol, margin_mode, leverage)
+        
+        print(f"📊 合约信息: {contract_info.get('baseCoin', '')}/{contract_info.get('quoteCoin', '')} - 最小数量: {min_trade_num}")
+        
+        return self._make_request("POST", "/api/v2/mix/order/place-order", order_data)
+    
+    def _set_leverage(self, symbol: str, margin_mode: str, leverage: str) -> Dict[str, Any]:
+        """设置杠杆倍数"""
+        product_type = "SUSDT-FUTURES" if self.sandbox else "USDT-FUTURES"
+        
+        leverage_data = {
+            "symbol": symbol,
+            "productType": product_type,
+            "marginMode": margin_mode,
+            "leverage": str(leverage)
+        }
+        
+        return self._make_request("POST", "/api/v2/mix/account/set-leverage", leverage_data)
+    
+    def _set_margin_mode(self, symbol: str, margin_mode: str) -> Dict[str, Any]:
+        """设置保证金模式"""
+        product_type = "SUSDT-FUTURES" if self.sandbox else "USDT-FUTURES"
+        
+        margin_data = {
+            "symbol": symbol,
+            "productType": product_type,
+            "marginMode": margin_mode
+        }
+        
+        return self._make_request("POST", "/api/v2/mix/account/set-margin-mode", margin_data)
+    
     def place_limit_order(self, coin: str, side: str, size: str, price: str,
-                         margin_mode: str = "crossed", 
+                         margin_mode: str = "isolated", 
                          force: str = "gtc") -> Dict[str, Any]:
         """
         下限价单
@@ -351,7 +658,7 @@ class BitgetAPI:
             "tradeSide": "open",
             "orderType": "limit",
             "force": force,
-            "clientOid": f"limit_{int(time.time())}"
+            "clientOid": f"limit_{int(time.time() * 1000)}_{random.randint(1000, 9999)}"
         }
         
         return self._make_request("POST", "/api/v2/mix/order/place-order", order_data)
@@ -374,13 +681,13 @@ class BitgetAPI:
         order_data = {
             "symbol": symbol,
             "productType": product_type,
-            "marginMode": "crossed",
+            "marginMode": "isolated",
             "marginCoin": "USDT",
             "size": str(size),
             "side": side,
             "tradeSide": "close",  # 平仓
             "orderType": order_type,
-            "clientOid": f"close_{int(time.time())}"
+            "clientOid": f"close_{int(time.time() * 1000)}_{random.randint(1000, 9999)}"
         }
         
         if order_type == "limit" and price:
@@ -399,63 +706,44 @@ class BitgetAPI:
         Returns:
             包含价格信息的字典
         """
-        symbol = self._get_symbol(coin)
+        try:
+            symbol = self._get_symbol(coin)
+        except ValueError:
+            # 如果符号解析失败，直接使用原始输入
+            symbol = coin.upper().strip()
         
-        # 尝试现货市场API
-        spot_url = f"{self.base_url}/api/v2/spot/market/ticker?symbol={symbol}"
+        # 优先尝试期货市场API（因为我们主要处理永续合约）
+        futures_url = f"{self.base_url}/api/v2/mix/market/ticker?symbol={symbol}&productType=USDT-FUTURES"
         
         try:
-            response = requests.get(spot_url)
-            result = {
-                "status_code": response.status_code,
-                "response": response.json() if response.text else {}
-            }
-            
-            if response.status_code == 200 and result['response'].get('code') == '00000':
-                data = result['response'].get('data', [])
-                if data:
-                    ticker = data[0]
+            response = requests.get(futures_url, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('code') == '00000':
+                    ticker_data = data.get('data', [])
+                    if ticker_data:
+                        ticker = ticker_data[0] if isinstance(ticker_data, list) else ticker_data
+                        return {
+                            "success": True,
+                            "symbol": symbol,
+                            "price": float(ticker.get('lastPr', 0)),
+                            "price_change_24h": float(ticker.get('chgUTC', 0)),
+                            "price_change_percent_24h": float(ticker.get('chgUtcRate', 0)) * 100,
+                            "volume_24h": float(ticker.get('baseVolume', 0)),
+                            "timestamp": ticker.get('ts', ''),
+                            "market_type": "futures"
+                        }
+                else:
                     return {
-                        "success": True,
-                        "symbol": symbol,
-                        "price": float(ticker.get('lastPr', 0)),
-                        "price_change_24h": float(ticker.get('chgUTC', 0)),
-                        "price_change_percent_24h": float(ticker.get('chgUtcRate', 0)) * 100,
-                        "volume_24h": float(ticker.get('baseVolume', 0)),
-                        "timestamp": ticker.get('ts', '')
+                        "success": False,
+                        "error": data.get('msg', '期货API错误'),
+                        "code": data.get('code', '')
                     }
-        except:
-            pass
-        
-        # 如果现货API失败，尝试期货市场API
-        futures_url = f"{self.base_url}/api/v2/mix/market/ticker?symbol={symbol}"
-        
-        try:
-            response = requests.get(futures_url)
-            result = {
-                "status_code": response.status_code,
-                "response": response.json() if response.text else {}
-            }
-            
-            if response.status_code == 200 and result['response'].get('code') == '00000':
-                data = result['response'].get('data', [])
-                if data:
-                    ticker = data[0]
-                    return {
-                        "success": True,
-                        "symbol": symbol,
-                        "price": float(ticker.get('lastPr', 0)),
-                        "price_change_24h": float(ticker.get('chgUTC', 0)),
-                        "price_change_percent_24h": float(ticker.get('chgUtcRate', 0)) * 100,
-                        "volume_24h": float(ticker.get('baseVolume', 0)),
-                        "timestamp": ticker.get('ts', '')
-                    }
-            
-            return {
-                "success": False,
-                "error": result['response'].get('msg', '获取价格失败'),
-                "code": result['response'].get('code', '')
-            }
+            else:
+                return {
+                    "success": False,
+                    "error": f"HTTP错误: {response.status_code}"
+                }
             
         except Exception as e:
             return {
@@ -540,6 +828,19 @@ def main():
     log_parser.add_argument("--clear", action="store_true", 
                            help="清空交易日志")
     
+    # 合约搜索命令
+    search_parser = subparsers.add_parser("search", help="搜索合约交易对")
+    search_parser.add_argument("query", help="搜索关键字 (如 BTC, ETH, TSLA)")
+    search_parser.add_argument("--limit", type=int, default=10, 
+                              help="返回结果数量限制")
+    
+    # 合约信息命令
+    info_parser = subparsers.add_parser("info", help="查看合约详细信息")
+    info_parser.add_argument("symbol", help="合约符号 (如 BTCUSDT_UMCBL)")
+    
+    # 刷新缓存命令
+    refresh_parser = subparsers.add_parser("refresh-cache", help="刷新合约信息缓存")
+    
     args = parser.parse_args()
     
     if not args.command:
@@ -574,6 +875,15 @@ def main():
             
         elif args.command == "log":
             handle_trading_log(api, args.limit, args.clear)
+            
+        elif args.command == "search":
+            handle_contract_search(api, args.query, args.limit)
+            
+        elif args.command == "info":
+            handle_contract_info(api, args.symbol)
+            
+        elif args.command == "refresh-cache":
+            handle_refresh_cache(api)
         
     except Exception as e:
         print(f"❌ 发生错误: {str(e)}")
@@ -736,6 +1046,77 @@ def handle_trading_log(api, limit, clear):
             print(f"{status_emoji} {record['timestamp']} | {record['action'].upper()} {record['size']} {record['coin']} | {record['status']}")
     else:
         print("📝 暂无交易记录")
+
+
+def handle_contract_search(api, query, limit):
+    """处理合约搜索"""
+    print(f"🔍 搜索合约: {query}")
+    
+    try:
+        results = api.search_contracts(query, limit)
+        
+        if not results:
+            print("❌ 未找到匹配的合约")
+            return
+        
+        print(f"\n=== 找到 {len(results)} 个匹配的合约 ===")
+        for i, contract in enumerate(results, 1):
+            symbol = contract['symbol']
+            display_name = contract['displayName']
+            min_trade = contract['minTradeNum']
+            max_lever = contract['maxLever']
+            
+            print(f"{i:>2}. {display_name}")
+            print(f"     交易对: {symbol}")
+            print(f"     最小数量: {min_trade} | 最大杠杆: {max_lever}x")
+            print()
+            
+    except Exception as e:
+        print(f"❌ 搜索失败: {str(e)}")
+
+
+def handle_contract_info(api, symbol):
+    """处理合约信息查询"""
+    print(f"📊 查询合约信息: {symbol}")
+    
+    try:
+        info = api.get_contract_info(symbol)
+        
+        if not info:
+            print(f"❌ 未找到合约: {symbol}")
+            return
+        
+        print(f"\n=== {symbol} 合约详情 ===")
+        print(f"基础币种: {info.get('baseCoin', 'N/A')}")
+        print(f"计价币种: {info.get('quoteCoin', 'N/A')}")
+        print(f"最小交易数量: {info.get('minTradeNum', 'N/A')}")
+        print(f"数量精度: {info.get('volumePlace', 'N/A')} 位小数")
+        print(f"价格精度: {info.get('pricePlace', 'N/A')} 位小数")
+        print(f"最小杠杆: {info.get('minLever', 'N/A')}x")
+        print(f"最大杠杆: {info.get('maxLever', 'N/A')}x")
+        print(f"最小交易金额(USDT): {info.get('minTradeUSDT', 'N/A')}")
+        print(f"最大交易金额(USDT): {info.get('maxTradeUSDT', 'N/A')}")
+        print(f"支持保证金币种: {', '.join(info.get('supportMarginCoins', []))}")
+        
+        if info.get('launchTime'):
+            print(f"上线时间: {info.get('launchTime', 'N/A')}")
+        if info.get('fundingTime'):
+            print(f"资金费用时间: {info.get('fundingTime', 'N/A')}")
+            
+    except Exception as e:
+        print(f"❌ 查询失败: {str(e)}")
+
+
+def handle_refresh_cache(api):
+    """处理缓存刷新"""
+    print("🔄 刷新合约信息缓存...")
+    
+    try:
+        api._refresh_contracts_cache()
+        print("✅ 缓存刷新完成")
+        
+    except Exception as e:
+        print(f"❌ 刷新失败: {str(e)}")
 
 
 if __name__ == "__main__":

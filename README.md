@@ -1,25 +1,28 @@
 # 💰 MoneyManager - 个人资产管理系统
 
-一个功能完整的个人资产管理系统，支持加密货币和股票管理、自动交易、实时价格更新等功能。
+一个功能完整的个人资产管理系统，支持多资产组管理、Bitget永续合约交易、策略自动化交易等功能。
 
 ## 🌟 主要功能
 
 ### 💼 资产管理
-- **加密货币管理**: 添加、编辑、删除加密货币持仓
-- **股票管理**: 添加、编辑、删除股票持仓
-- **实时总览**: 显示总资产价值和分类汇总
+- **资产组管理**: 支持多个投资组合的独立管理
+- **智能资产添加**: 通过Bitget API智能搜索和添加交易对
+- **实时价格更新**: 批量刷新资产组内所有资产价格
+- **资产组统计**: 显示每个资产组的总价值和占比分析
 - **数据持久化**: 所有数据保存在本地JSON文件中
 
 ### 📈 价格更新
-- **加密货币价格**: 使用Coinbase API获取实时价格
-- **股票价格**: 使用智能价格生成系统（支持多种API集成）
-- **批量更新**: 一键刷新所有持仓价格
+- **Bitget实时价格**: 通过Bitget API获取所有永续合约实时价格
+- **批量价格刷新**: 一键刷新资产组内所有资产价格
+- **价格缓存**: 智能缓存机制提升价格查询性能
 - **状态反馈**: 显示更新进度和结果
 
 ### 🤖 自动交易
 - **交易开关**: 可控制的自动交易开关
-- **投资组合监控**: 基于资产变化自动执行交易
+- **资产组管理**: 支持多个资产组和策略管理
 - **Bitget API集成**: 支持市价单、限价单、平仓等操作
+- **合约搜索**: 智能搜索和匹配所有Bitget永续合约
+- **逐仓交易**: 默认使用逐仓保证金模式
 - **交易日志**: 完整的交易记录和状态跟踪
 
 ### 📊 交易记录
@@ -43,9 +46,9 @@
 - **文件存储**: JSON文件数据持久化
 
 ### 外部API集成
-- **Coinbase API**: 免费加密货币价格数据
-- **Bitget API**: 专业交易所API
-- **多种股票API**: Alpha Vantage、IEX Cloud、Finnhub等
+- **Bitget API**: 专业永续合约交易和价格数据
+- **智能合约搜索**: 实时搜索546个USDT永续合约
+- **价格缓存机制**: 本地缓存提升查询性能
 
 ## 📦 安装和运行
 
@@ -99,26 +102,44 @@ pip install requests
 
 ## 🎯 使用指南
 
-### 添加资产
-1. 选择"加密货币"或"股票"标签页
-2. 填写资产名称、价格和数量
-3. 点击"添加"按钮
+### 管理资产组
+1. 点击"新建资产组"创建投资组合
+2. 选择资产组后点击"添加资产"
+3. 在搜索框中输入币种名称（如BTC、ETH）
+4. 系统自动匹配Bitget合约并添加到资产组
 
 ### 更新价格
-1. 点击"刷新加密货币价格"或"刷新股票价格"按钮
-2. 系统自动获取最新价格并更新显示
-3. 查看更新状态提示
+1. 选择要更新的资产组
+2. 点击"刷新价格"按钮
+3. 系统通过Bitget API获取最新价格
+4. 查看资产组总价值和占比变化
 
-### 启用自动交易
-1. 打开"自动交易开关"
-2. 系统开始监控资产变化
-3. 在"交易记录"标签页查看交易历史
+### 启用策略交易
+1. 在"策略设置"标签页选择资产组
+2. 配置策略参数（目标权重、再平衡阈值等）
+3. 点击"开启策略"启动自动交易
+4. 在"交易记录"查看策略执行结果
 
 ### Python命令行工具
+
+**搜索合约:**
+```bash
+python bitget_api.py --api-key YOUR_KEY --secret-key YOUR_SECRET --passphrase YOUR_PASS search BTC --limit 5
+```
 
 **查询价格:**
 ```bash
 python bitget_api.py --api-key YOUR_KEY --secret-key YOUR_SECRET --passphrase YOUR_PASS price BTC ETH SOL
+```
+
+**查看合约详情:**
+```bash
+python bitget_api.py --api-key YOUR_KEY --secret-key YOUR_SECRET --passphrase YOUR_PASS info BTCUSDT
+```
+
+**下市价单:**
+```bash
+python bitget_api.py --api-key YOUR_KEY --secret-key YOUR_SECRET --passphrase YOUR_PASS market BTC buy 0.001
 ```
 
 **自动交易:**
@@ -141,27 +162,42 @@ moneymanager/
 │   └── config.js         # 前端配置
 ├── server.js             # Express后端服务
 ├── bitget_api.py         # Python交易API
-├── config.json           # API配置文件
-├── assets.json           # 资产数据文件
-├── package.json          # Node.js依赖
-├── API_README.md         # API文档
-└── UI功能说明.md         # UI功能说明
+├── config.json           # Bitget API配置文件
+├── assets.json           # 资产组数据文件
+├── trading_logs.json     # 交易记录日志
+├── bitget_contracts_cache.json  # Bitget合约缓存
+├── bitget_config.json    # Bitget配置文件
+├── api_examples.json     # API使用示例
+└── package.json          # Node.js依赖
 ```
 
 ## 🔧 API接口
 
-### 资产管理API
-- `GET /api/assets` - 获取所有资产和汇总
-- `POST /api/assets/crypto` - 添加加密货币
-- `POST /api/assets/stocks` - 添加股票
-- `PUT /api/assets/crypto/:id` - 更新加密货币
-- `PUT /api/assets/stocks/:id` - 更新股票
-- `DELETE /api/assets/crypto/:id` - 删除加密货币
-- `DELETE /api/assets/stocks/:id` - 删除股票
+### 资产组管理API
+- `GET /api/groups` - 获取所有资产组
+- `POST /api/groups` - 创建新资产组
+- `DELETE /api/groups/:groupId` - 删除资产组
+- `POST /api/groups/:groupId/assets` - 添加资产到资产组
+- `PUT /api/groups/:groupId/assets/:assetId` - 更新资产信息
+- `DELETE /api/groups/:groupId/assets/:assetId` - 删除资产
+- `POST /api/groups/:groupId/refresh-prices` - 刷新资产组价格
 
-### 价格查询API
-- `GET /api/stock-price/:symbol` - 获取单个股票价格
-- `POST /api/stock-prices/batch` - 批量获取股票价格
+### 策略交易API
+- `GET /api/groups/:groupId/strategy` - 获取策略配置
+- `PUT /api/groups/:groupId/strategy` - 更新策略配置
+- `POST /api/groups/:groupId/strategy/enable` - 启用策略
+- `POST /api/groups/:groupId/strategy/disable` - 禁用策略
+- `POST /api/groups/:groupId/strategy/rebalance` - 执行再平衡
+
+### Bitget API
+- `GET /api/bitget/search` - 搜索合约交易对
+- `GET /api/bitget/config` - 获取API配置
+- `PUT /api/bitget/config` - 更新API配置
+- `POST /api/trade/manual` - 手动执行交易
+
+### 交易记录API
+- `GET /api/trading/logs` - 获取交易日志
+- `POST /api/trading/logs/clear` - 清空交易日志
 
 ## 🛡️ 安全特性
 
@@ -179,22 +215,39 @@ moneymanager/
 ## 🔮 扩展功能
 
 ### 当前支持的交易所
-- **Bitget**: 完整的交易功能支持
+- **Bitget**: 
+  - 完整的永续合约交易功能
+  - 546个USDT永续合约支持
+  - 智能合约搜索和匹配
+  - 逐仓保证金模式
+  - 自动数量精度调整
+  - 合约信息本地缓存
 
-### 支持的API服务
-- **Coinbase**: 免费加密货币价格
-- **Alpha Vantage**: 股票价格API
-- **IEX Cloud**: 专业股票数据
-- **Finnhub**: 实时股票数据
-- **Yahoo Finance**: 免费股票数据
+### 核心技术栈
+- **Bitget API**: 专业永续合约交易API
+- **Express.js**: 轻量级后端服务框架
+- **原生JavaScript**: 前端交互和UI管理
+- **Python**: 高性能交易算法和API调用
+- **JSON文件存储**: 本地数据持久化
+
+### 最近更新 (v2.0)
+- ✅ Bitget API全面升级
+- ✅ 支持所有USDT永续合约
+- ✅ 智能合约搜索功能
+- ✅ 逐仓保证金模式
+- ✅ 合约信息缓存机制
+- ✅ 自动数量精度调整
+- ✅ 策略保护机制
 
 ### 计划功能
-- [ ] 更多交易所支持
-- [ ] 实时WebSocket价格推送
+- [ ] WebSocket实时价格推送
+- [ ] 更多交易所支持（Binance、OKX等）
 - [ ] 价格图表和技术分析
-- [ ] 移动端适配
+- [ ] 移动端PWA应用
 - [ ] 数据导出功能
+- [ ] 高级策略配置（网格交易、DCA等）
 - [ ] 投资组合分析报告
+- [ ] 风险管理和止损设置
 
 ## 🤝 贡献指南
 

@@ -47,7 +47,19 @@ config.json
 assets.json
 assets_history.json
 trading_log.json
+trading_logs.json
 portfolio_analysis.json
+
+# Bitget API related files
+bitget_config.json
+bitget_contracts_cache.json
+
+# Test and debug files
+test_*.py
+debug_*.py
+*_test_*.json
+*_report_*.json
+*_migration_*.json
 
 # Python
 __pycache__/
