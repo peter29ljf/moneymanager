@@ -94,6 +94,7 @@ h1{font-size:24px;margin:0}
   <div class="tabs">
     <button class="tab active" onclick="switchTab('groups', this)">资产组</button>
     <button class="tab" onclick="switchTab('strategy', this)">策略设置</button>
+    <button class="tab" onclick="switchTab('strategy-comparison', this)">策略对比</button>
     <button class="tab" onclick="switchTab('bitget', this)">Bitget设置</button>
     <button class="tab" onclick="switchTab('trading-log', this)">交易记录</button>
   </div>
@@ -172,6 +173,43 @@ h1{font-size:24px;margin:0}
     <div class="card" style="margin-top:16px">
       <h3 style="margin:0 0 10px">最近一次刷新结果</h3>
       <div id="strategy-last-result"></div>
+    </div>
+  </div>
+
+  <!-- 策略对比 -->
+  <div id="strategy-comparison-tab" class="section">
+    <div class="card">
+      <div class="grid-2">
+        <div>
+          <label class="label">选择资产组</label>
+          <select id="comparison-group-selector" class="select"></select>
+        </div>
+        <div style="display:flex;align-items:flex-end;gap:10px">
+          <button id="refresh-comparison" class="btn btn-refresh">刷新对比</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 手续费配置 -->
+    <div class="card" style="margin-top:16px">
+      <h3 style="margin:0 0 12px">手续费配置</h3>
+      <div class="grid-2">
+        <div>
+          <label class="label">手续费百分比 (%)</label>
+          <input id="fee-percent" type="number" min="0" max="10" step="0.01" value="0.1" class="select"/>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:22px">
+          <input id="fee-enabled" type="checkbox" checked> <span class="muted">启用手续费计算</span>
+        </div>
+      </div>
+      <div style="margin-top:12px">
+        <button id="save-fee-config" class="btn btn-primary">保存手续费配置</button>
+      </div>
+    </div>
+
+    <!-- 策略对比结果 -->
+    <div id="strategy-comparison-content">
+      <div class="muted">请选择资产组查看策略对比...</div>
     </div>
   </div>
 

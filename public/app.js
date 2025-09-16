@@ -15,6 +15,8 @@ class AssetManager {
         await this.loadGroups();
         this.updateGroupDisplay();
         this.loadTradingLog();
+        this.loadFeeConfig();
+        this.loadStrategyComparison();
         this.startPriceRefreshLoop();
     }
 
@@ -32,6 +34,11 @@ class AssetManager {
         const bitgetSave = document.getElementById('bitget-save');
         const deleteGroupBtn = document.getElementById('btn-delete-group');
         const clearLogsBtn = document.getElementById('clear-logs');
+        
+        // 策略对比相关元素
+        const comparisonGroupSelector = document.getElementById('comparison-group-selector');
+        const refreshComparisonBtn = document.getElementById('refresh-comparison');
+        const saveFeeConfigBtn = document.getElementById('save-fee-config');
 
         // 新建资产组按钮 - 添加错误处理
         if (btnNewGroup) {
@@ -71,6 +78,16 @@ class AssetManager {
         if (bitgetSave) bitgetSave.addEventListener('click', () => this.saveBitgetConfig());
         if (deleteGroupBtn) deleteGroupBtn.addEventListener('click', () => this.deleteCurrentGroup());
         if (clearLogsBtn) clearLogsBtn.addEventListener('click', () => this.clearTradingLogs());
+        
+        // 策略对比事件监听器
+        if (comparisonGroupSelector) {
+            comparisonGroupSelector.addEventListener('change', (e) => {
+                this.currentGroupId = e.target.value || null;
+                this.loadStrategyComparison();
+            });
+        }
+        if (refreshComparisonBtn) refreshComparisonBtn.addEventListener('click', () => this.loadStrategyComparison());
+        if (saveFeeConfigBtn) saveFeeConfigBtn.addEventListener('click', () => this.saveFeeConfig());
 
         // 向导按钮
         document.getElementById('wizard-cancel').addEventListener('click', () => this.closeWizard());
@@ -391,15 +408,29 @@ class AssetManager {
 
     renderStrategySelectors() {
         const selector = document.getElementById('strategy-group-selector');
-        if (!selector) return;
-        selector.innerHTML = '';
-        this.groups.forEach(g => {
-            const opt = document.createElement('option');
-            opt.value = g.id;
-            opt.textContent = `${g.name}`;
-            selector.appendChild(opt);
-        });
-        if (this.currentGroupId) selector.value = this.currentGroupId;
+        const comparisonSelector = document.getElementById('comparison-group-selector');
+        
+        if (selector) {
+            selector.innerHTML = '';
+            this.groups.forEach(g => {
+                const opt = document.createElement('option');
+                opt.value = g.id;
+                opt.textContent = `${g.name}`;
+                selector.appendChild(opt);
+            });
+            if (this.currentGroupId) selector.value = this.currentGroupId;
+        }
+        
+        if (comparisonSelector) {
+            comparisonSelector.innerHTML = '';
+            this.groups.forEach(g => {
+                const opt = document.createElement('option');
+                opt.value = g.id;
+                opt.textContent = `${g.name}`;
+                comparisonSelector.appendChild(opt);
+            });
+            if (this.currentGroupId) comparisonSelector.value = this.currentGroupId;
+        }
     }
 
     getCurrentGroup() {
@@ -912,11 +943,203 @@ class AssetManager {
             box.innerHTML = '<div class="loading">加载失败</div>';
         }
     }
+
+    // 加载手续费配置
+    async loadFeeConfig() {
+        try {
+            const response = await fetch('/api/fee-config');
+            if (!response.ok) return;
+            const data = await response.json();
+            if (data.success) {
+                const config = data.config;
+                document.getElementById('fee-percent').value = config.tradingFeePercent || 0.1;
+                document.getElementById('fee-enabled').checked = config.enabled !== false;
+            }
+        } catch (error) {
+            console.error('Error loading fee config:', error);
+        }
+    }
+
+    // 保存手续费配置
+    async saveFeeConfig() {
+        try {
+            const tradingFeePercent = parseFloat(document.getElementById('fee-percent').value);
+            const enabled = document.getElementById('fee-enabled').checked;
+            
+            const response = await fetch('/api/fee-config', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tradingFeePercent, enabled })
+            });
+            
+            if (response.ok) {
+                this.showUpdateStatus('手续费配置已保存', 'success');
+                this.loadStrategyComparison(); // 重新加载对比数据
+            } else {
+                const error = await response.json();
+                this.showUpdateStatus(`保存失败: ${error.error}`, 'error');
+            }
+        } catch (error) {
+            this.showUpdateStatus(`保存失败: ${error.message}`, 'error');
+        }
+    }
+
+    // 加载策略对比
+    async loadStrategyComparison() {
+        if (!this.currentGroupId) {
+            document.getElementById('strategy-comparison-content').innerHTML = 
+                '<div class="muted">请选择资产组查看策略对比...</div>';
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/groups/${this.currentGroupId}/strategy-comparison-with-fees`);
+            if (!response.ok) return;
+            const data = await response.json();
+            if (data.success && data.hasBaseline) {
+                this.renderStrategyComparison(data);
+            } else {
+                document.getElementById('strategy-comparison-content').innerHTML = 
+                    '<div class="muted">该资产组尚未启用策略，无法进行对比</div>';
+            }
+        } catch (error) {
+            console.error('Error loading strategy comparison:', error);
+            document.getElementById('strategy-comparison-content').innerHTML = 
+                '<div class="muted">加载策略对比失败</div>';
+        }
+    }
+
+    // 渲染策略对比
+    renderStrategyComparison(data) {
+        const container = document.getElementById('strategy-comparison-content');
+        
+        const feeInfo = data.feeInfo;
+        const buyAndHold = data.buyAndHoldStrategy;
+        const rebalance = data.rebalanceStrategy;
+        const comparison = data.comparison;
+        const summary = data.summary;
+
+        container.innerHTML = `
+            <!-- 手续费信息 -->
+            <div class="card" style="margin-bottom:16px">
+                <h3 style="margin:0 0 12px">手续费统计</h3>
+                <div class="grid-2">
+                    <div>
+                        <div class="metric-title">总交易额</div>
+                        <div class="metric-val">$${feeInfo.totalTradingVolume.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                    </div>
+                    <div>
+                        <div class="metric-title">总手续费</div>
+                        <div class="metric-val">$${feeInfo.totalFees.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                    </div>
+                    <div>
+                        <div class="metric-title">手续费率</div>
+                        <div class="metric-val">${feeInfo.tradingFeePercent}%</div>
+                    </div>
+                    <div>
+                        <div class="metric-title">成功交易次数</div>
+                        <div class="metric-val">${feeInfo.tradeCount}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 策略对比结果 -->
+            <div class="grid-2" style="margin-bottom:16px">
+                <!-- 持仓不动策略 -->
+                <div class="card">
+                    <h3 style="margin:0 0 12px">${buyAndHold.name}</h3>
+                    <div class="metric-title">当前总价值</div>
+                    <div class="metric-val">$${buyAndHold.totalNow.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                    <div class="metric-title" style="margin-top:12px">总收益</div>
+                    <div class="metric-val" style="color:${buyAndHold.deltaTotal >= 0 ? 'var(--green)' : 'var(--red)'}">
+                        $${buyAndHold.deltaTotal.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} (${buyAndHold.returnPercent.toFixed(2)}%)
+                    </div>
+                    <div class="metric-title">年化收益率</div>
+                    <div class="metric-val">${buyAndHold.annualizedReturn.toFixed(2)}%</div>
+                </div>
+
+                <!-- 自动平衡策略 -->
+                <div class="card">
+                    <h3 style="margin:0 0 12px">${rebalance.name}</h3>
+                    <div class="metric-title">当前总价值</div>
+                    <div class="metric-val">$${rebalance.totalNow.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                    <div class="metric-title" style="margin-top:12px">毛收益</div>
+                    <div class="metric-val" style="color:${rebalance.grossReturn >= 0 ? 'var(--green)' : 'var(--red)'}">
+                        $${rebalance.grossReturn.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} (${rebalance.grossReturnPercent.toFixed(2)}%)
+                    </div>
+                    <div class="metric-title">扣除手续费后净收益</div>
+                    <div class="metric-val" style="color:${rebalance.netReturn >= 0 ? 'var(--green)' : 'var(--red)'}">
+                        $${rebalance.netReturn.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} (${rebalance.netReturnPercent.toFixed(2)}%)
+                    </div>
+                    <div class="metric-title">年化收益率</div>
+                    <div class="metric-val">${rebalance.annualizedReturn.toFixed(2)}%</div>
+                </div>
+            </div>
+
+            <!-- 对比分析 -->
+            <div class="card" style="margin-bottom:16px">
+                <h3 style="margin:0 0 12px">策略对比分析</h3>
+                <div class="grid-2">
+                    <div>
+                        <div class="metric-title">表现更好的策略</div>
+                        <div class="metric-val" style="color:var(--primary)">${comparison.betterStrategyName}</div>
+                    </div>
+                    <div>
+                        <div class="metric-title">超额收益</div>
+                        <div class="metric-val" style="color:${comparison.outperformance >= 0 ? 'var(--green)' : 'var(--red)'}">
+                            $${comparison.outperformance.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} (${comparison.outperformancePercent.toFixed(2)}%)
+                        </div>
+                    </div>
+                </div>
+                <div style="margin-top:12px;padding:12px;background:#f8f9fa;border-radius:8px;">
+                    <strong>总结：</strong>${summary.message}
+                </div>
+                <div style="margin-top:8px;padding:12px;background:#e3f2fd;border-radius:8px;">
+                    <strong>建议：</strong>${summary.recommendation}
+                </div>
+            </div>
+
+            <!-- 详细资产对比表格 -->
+            <div class="card">
+                <h3 style="margin:0 0 12px">详细资产对比</h3>
+                <div style="overflow-x:auto;">
+                    <table style="width:100%;border-collapse:collapse;">
+                        <thead>
+                            <tr style="background:#f8f9fa;">
+                                <th style="padding:8px;text-align:left;border:1px solid #dee2e6;">资产</th>
+                                <th style="padding:8px;text-align:right;border:1px solid #dee2e6;">持仓不动策略</th>
+                                <th style="padding:8px;text-align:right;border:1px solid #dee2e6;">自动平衡策略</th>
+                                <th style="padding:8px;text-align:right;border:1px solid #dee2e6;">差异</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${buyAndHold.byAsset.map((asset, index) => {
+                                const rebalanceAsset = rebalance.byAsset[index];
+                                const difference = rebalanceAsset.valueNow - asset.valueNow;
+                                const diffPercent = asset.valueNow > 0 ? (difference / asset.valueNow) * 100 : 0;
+                                return `
+                                    <tr>
+                                        <td style="padding:8px;border:1px solid #dee2e6;">${asset.symbol.replace('_UMCBL', '')}</td>
+                                        <td style="padding:8px;text-align:right;border:1px solid #dee2e6;">$${asset.valueNow.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                                        <td style="padding:8px;text-align:right;border:1px solid #dee2e6;">$${rebalanceAsset.valueNow.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                                        <td style="padding:8px;text-align:right;border:1px solid #dee2e6;color:${difference >= 0 ? 'var(--green)' : 'var(--red)'}">
+                                            $${difference.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} (${diffPercent.toFixed(2)}%)
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+
 }
 
 function switchTab(tabName, btn) {
     document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+    document.querySelectorAll('.section').forEach(content => content.classList.remove('active'));
     
     if (btn) btn.classList.add('active');
     document.getElementById(`${tabName}-tab`).classList.add('active');
@@ -925,6 +1148,8 @@ function switchTab(tabName, btn) {
         assetManager.loadStrategy();
         assetManager.loadStrategyLastResult();
         window.__strategyPoller = setInterval(() => assetManager.loadStrategyLastResult(), 30000);
+    } else if (tabName === 'strategy-comparison') {
+        assetManager.loadStrategyComparison();
     } else {
         if (window.__strategyPoller) {
             clearInterval(window.__strategyPoller);

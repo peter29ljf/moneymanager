@@ -409,6 +409,32 @@ function httpsGetJson(url) {
   });
 }
 
+// 检查股票市场是否开放（简单实现）
+function isStockMarketOpen() {
+  const now = new Date();
+  const day = now.getDay(); // 0=周日, 1=周一, ..., 6=周六
+  const hour = now.getHours();
+  const minute = now.getMinutes();
+  
+  // 周末不开放
+  if (day === 0 || day === 6) {
+    return false;
+  }
+  
+  // 工作日：9:30-16:00 (美东时间，这里简化处理)
+  const currentTime = hour * 60 + minute;
+  const marketOpen = 9 * 60 + 30; // 9:30
+  const marketClose = 16 * 60; // 16:00
+  
+  return currentTime >= marketOpen && currentTime < marketClose;
+}
+
+// 检查是否为股票交易对
+function isStockSymbol(symbol) {
+  const stockSymbols = ['TSLAUSDT_UMCBL', 'NVDAUSDT_UMCBL', 'AAPLUSDT_UMCBL', 'GOOGLUSDT_UMCBL', 'MSFTUSDT_UMCBL', 'AMZNUSDT_UMCBL', 'METAUSDT_UMCBL'];
+  return stockSymbols.includes(symbol);
+}
+
 async function fetchBitgetV1TickerLast(symbol) {
   const url = `https://api.bitget.com/api/mix/v1/market/ticker?symbol=${encodeURIComponent(symbol)}`;
   const json = await httpsGetJson(url);
@@ -510,16 +536,29 @@ async function runRebalanceOnce(groupId) {
     const factor = Math.pow(10, decimals);
     return Math.floor(absQty * factor) / factor; // 向下取整，避免超出金额上限
   }
+  
+  // 检查股票市场是否开放
+  const marketOpen = isStockMarketOpen();
+  
   for (const a of group.assets) {
     const d = deviations.find(x => x.symbol === a.symbol);
     if (!d) continue;
     const price = Number(a.price || 0);
+    
+    // 如果是股票交易对且市场未开放，跳过交易 - 已禁用，让交易所来决定是否接受交易
+    // if (isStockSymbol(a.symbol) && !marketOpen) {
+    //   console.log(`⏰ 跳过股票交易（市场未开放）: ${a.symbol} ${d.deviationAmount > 0 ? 'BUY' : 'SELL'} ${Math.abs(d.deviationAmount).toFixed(2)} USDT`);
+    //   continue;
+    // }
+    
     if (Math.abs(d.deviationAmount) >= minTrade && price > 0) {
       const cappedValue = Math.min(Math.abs(d.deviationAmount), maxTrade);
       const rawQty = cappedValue / price;
       const roundedQty = roundQtyForSymbol(a.symbol, rawQty);
+      console.log(`💰 ${a.symbol}: 偏差=${d.deviationAmount.toFixed(2)}, 价格=${price}, 原始数量=${rawQty.toFixed(6)}, 舍入数量=${roundedQty}`);
       if (roundedQty > 0) {
         actions.push({ symbol: a.symbol, side: d.deviationAmount > 0 ? 'BUY' : 'SELL', valueUSDT: cappedValue, quantity: roundedQty });
+        console.log(`✅ 添加交易操作: ${a.symbol} ${d.deviationAmount > 0 ? 'BUY' : 'SELL'} ${roundedQty} (${cappedValue.toFixed(2)} USDT)`);
       }
     }
   }
@@ -551,13 +590,16 @@ async function runRebalanceOnce(groupId) {
           act.realTradeStatus = 'success';
           act.realTradeOutput = result.out;
         } else {
+          // 交易失败：不更新持仓数量，只记录失败状态
           act.realTradeStatus = 'failed';
-          // 将 stderr 或 stdout 任一返回的错误信息保存到日志
           act.realTradeError = result.err || result.out;
+          console.log(`❌ 交易失败，跳过持仓更新: ${act.symbol} ${act.side} ${act.quantity}`);
         }
       } catch (error) {
+        // 交易错误：不更新持仓数量，只记录错误状态
         act.realTradeStatus = 'error';
         act.realTradeError = error.message;
+        console.log(`❌ 交易错误，跳过持仓更新: ${act.symbol} ${act.side} ${act.quantity} - ${error.message}`);
       }
     }
   } else {
@@ -683,6 +725,49 @@ app.post('/api/groups/:groupId/strategy/run-once', async (req, res) => {
   }
 });
 
+// 重置股票持仓到基线状态（修复失败交易导致的持仓错误）
+app.post('/api/groups/:groupId/reset-stock-positions', (req, res) => {
+  try {
+    const data = readAssets();
+    const group = data.groups.find(g => g.id === req.params.groupId);
+    if (!group) return res.status(404).json({ error: '资产组不存在' });
+    
+    const s = ensureGroupStrategy(group);
+    const baseline = s.baselineSnapshot;
+    if (!baseline) {
+      return res.status(400).json({ error: '没有基线数据，无法重置' });
+    }
+    
+    let resetCount = 0;
+    const stockSymbols = ['TSLAUSDT_UMCBL', 'NVDAUSDT_UMCBL'];
+    
+    for (const asset of group.assets) {
+      if (stockSymbols.includes(asset.symbol)) {
+        const baselineAsset = baseline.assets.find(a => a.symbol === asset.symbol);
+        if (baselineAsset) {
+          const oldQuantity = asset.quantity;
+          asset.quantity = baselineAsset.quantity;
+          asset.updatedAt = new Date().toISOString();
+          resetCount++;
+          console.log(`🔄 重置 ${asset.symbol} 持仓: ${oldQuantity} -> ${baselineAsset.quantity}`);
+        }
+      }
+    }
+    
+    if (writeAssets(data)) {
+      res.json({ 
+        success: true, 
+        message: `已重置 ${resetCount} 个股票持仓到基线状态`,
+        resetCount 
+      });
+    } else {
+      res.status(500).json({ error: '保存失败' });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message || '重置失败' });
+  }
+});
+
 // 获取最近一次调仓结果
 app.get('/api/groups/:groupId/strategy/last-result', (req, res) => {
   const data = readAssets();
@@ -719,12 +804,35 @@ app.get('/api/groups/:groupId/stats', (req, res) => {
   const s = ensureGroupStrategy(group);
   const baseline = s.baselineSnapshot;
   if (!baseline) return res.json({ success: true, hasBaseline: false });
+  
   const currentTotal = group.assets.reduce((sum, a) => sum + (Number(a.price || 0) * Number(a.quantity || 0)), 0);
   const baselineMap = new Map((baseline.assets || []).map(a => [a.symbol, a]));
-  const byAsset = [];
+  
+  // 计算持仓不动策略的当前价值（使用基线持仓数量 + 当前价格）
+  let buyAndHoldTotal = 0;
+  const buyAndHoldByAsset = [];
+  
   for (const a of group.assets) {
     const b = baselineMap.get(a.symbol) || { quantity: 0, price: 0 };
-    byAsset.push({
+    const buyAndHoldValue = Number(b.quantity || 0) * Number(a.price || 0);
+    buyAndHoldTotal += buyAndHoldValue;
+    
+    buyAndHoldByAsset.push({
+      symbol: a.symbol,
+      quantity: Number(b.quantity || 0), // 基线持仓数量
+      priceStart: Number(b.price || 0),
+      priceNow: Number(a.price || 0),
+      valueStart: Number(b.quantity || 0) * Number(b.price || 0),
+      valueNow: buyAndHoldValue,
+      deltaValue: buyAndHoldValue - (Number(b.quantity || 0) * Number(b.price || 0))
+    });
+  }
+  
+  // 计算自动平衡策略的当前价值
+  const rebalanceByAsset = [];
+  for (const a of group.assets) {
+    const b = baselineMap.get(a.symbol) || { quantity: 0, price: 0 };
+    rebalanceByAsset.push({
       symbol: a.symbol,
       quantityStart: Number(b.quantity || 0),
       quantityNow: Number(a.quantity || 0),
@@ -734,14 +842,399 @@ app.get('/api/groups/:groupId/stats', (req, res) => {
       deltaValue: (Number(a.quantity || 0) * Number(a.price || 0)) - (Number(b.quantity || 0) * Number(b.price || 0))
     });
   }
+  
+  // 计算策略对比
+  const baselineTotal = Number(baseline.totalValue || 0);
+  const buyAndHoldReturn = buyAndHoldTotal - baselineTotal;
+  const rebalanceReturn = currentTotal - baselineTotal;
+  const buyAndHoldReturnPercent = baselineTotal > 0 ? (buyAndHoldReturn / baselineTotal) * 100 : 0;
+  const rebalanceReturnPercent = baselineTotal > 0 ? (rebalanceReturn / baselineTotal) * 100 : 0;
+  const outperformance = rebalanceReturn - buyAndHoldReturn;
+  const outperformancePercent = baselineTotal > 0 ? (outperformance / baselineTotal) * 100 : 0;
+  
   res.json({
     success: true,
     hasBaseline: true,
     baselineAt: baseline.timestamp,
-    totalStart: Number(baseline.totalValue || 0),
+    totalStart: baselineTotal,
+    
+    // 自动平衡策略结果
+    rebalanceStrategy: {
+      totalNow: currentTotal,
+      deltaTotal: rebalanceReturn,
+      returnPercent: rebalanceReturnPercent,
+      byAsset: rebalanceByAsset
+    },
+    
+    // 持仓不动策略结果
+    buyAndHoldStrategy: {
+      totalNow: buyAndHoldTotal,
+      deltaTotal: buyAndHoldReturn,
+      returnPercent: buyAndHoldReturnPercent,
+      byAsset: buyAndHoldByAsset
+    },
+    
+    // 策略对比
+    strategyComparison: {
+      outperformance: outperformance,
+      outperformancePercent: outperformancePercent,
+      betterStrategy: outperformance > 0 ? 'rebalance' : 'buyAndHold',
+      daysSinceStart: Math.floor((new Date() - new Date(baseline.timestamp)) / (1000 * 60 * 60 * 24))
+    },
+    
+    // 兼容旧版本
     totalNow: currentTotal,
-    deltaTotal: currentTotal - Number(baseline.totalValue || 0),
-    byAsset
+    deltaTotal: rebalanceReturn,
+    byAsset: rebalanceByAsset
+  });
+});
+
+// 策略对比分析：详细对比自动平衡策略与持仓不动策略
+app.get('/api/groups/:groupId/strategy-comparison', (req, res) => {
+  const data = readAssets();
+  const group = data.groups.find(g => g.id === req.params.groupId);
+  if (!group) return res.status(404).json({ success: false, error: '资产组不存在' });
+  const s = ensureGroupStrategy(group);
+  const baseline = s.baselineSnapshot;
+  if (!baseline) return res.json({ success: true, hasBaseline: false });
+  
+  const currentTotal = group.assets.reduce((sum, a) => sum + (Number(a.price || 0) * Number(a.quantity || 0)), 0);
+  const baselineMap = new Map((baseline.assets || []).map(a => [a.symbol, a]));
+  const baselineTotal = Number(baseline.totalValue || 0);
+  
+  // 计算持仓不动策略
+  let buyAndHoldTotal = 0;
+  const buyAndHoldDetails = [];
+  
+  for (const a of group.assets) {
+    const b = baselineMap.get(a.symbol) || { quantity: 0, price: 0 };
+    const buyAndHoldValue = Number(b.quantity || 0) * Number(a.price || 0);
+    buyAndHoldTotal += buyAndHoldValue;
+    
+    const priceChange = Number(a.price || 0) - Number(b.price || 0);
+    const priceChangePercent = Number(b.price || 0) > 0 ? (priceChange / Number(b.price || 0)) * 100 : 0;
+    
+    buyAndHoldDetails.push({
+      symbol: a.symbol,
+      quantity: Number(b.quantity || 0),
+      priceStart: Number(b.price || 0),
+      priceNow: Number(a.price || 0),
+      priceChange: priceChange,
+      priceChangePercent: priceChangePercent,
+      valueStart: Number(b.quantity || 0) * Number(b.price || 0),
+      valueNow: buyAndHoldValue,
+      deltaValue: buyAndHoldValue - (Number(b.quantity || 0) * Number(b.price || 0))
+    });
+  }
+  
+  // 计算自动平衡策略
+  const rebalanceDetails = [];
+  for (const a of group.assets) {
+    const b = baselineMap.get(a.symbol) || { quantity: 0, price: 0 };
+    const currentValue = Number(a.quantity || 0) * Number(a.price || 0);
+    const baselineValue = Number(b.quantity || 0) * Number(b.price || 0);
+    
+    rebalanceDetails.push({
+      symbol: a.symbol,
+      quantityStart: Number(b.quantity || 0),
+      quantityNow: Number(a.quantity || 0),
+      deltaQuantity: Number(a.quantity || 0) - Number(b.quantity || 0),
+      priceStart: Number(b.price || 0),
+      priceNow: Number(a.price || 0),
+      valueStart: baselineValue,
+      valueNow: currentValue,
+      deltaValue: currentValue - baselineValue
+    });
+  }
+  
+  // 计算总体对比
+  const buyAndHoldReturn = buyAndHoldTotal - baselineTotal;
+  const rebalanceReturn = currentTotal - baselineTotal;
+  const buyAndHoldReturnPercent = baselineTotal > 0 ? (buyAndHoldReturn / baselineTotal) * 100 : 0;
+  const rebalanceReturnPercent = baselineTotal > 0 ? (rebalanceReturn / baselineTotal) * 100 : 0;
+  const outperformance = rebalanceReturn - buyAndHoldReturn;
+  const outperformancePercent = baselineTotal > 0 ? (outperformance / baselineTotal) * 100 : 0;
+  
+  // 计算年化收益率
+  const daysSinceStart = Math.floor((new Date() - new Date(baseline.timestamp)) / (1000 * 60 * 60 * 24));
+  const yearsSinceStart = daysSinceStart / 365.25;
+  const buyAndHoldAnnualized = yearsSinceStart > 0 ? Math.pow(1 + buyAndHoldReturnPercent / 100, 1 / yearsSinceStart) - 1 : 0;
+  const rebalanceAnnualized = yearsSinceStart > 0 ? Math.pow(1 + rebalanceReturnPercent / 100, 1 / yearsSinceStart) - 1 : 0;
+  
+  res.json({
+    success: true,
+    hasBaseline: true,
+    baselineAt: baseline.timestamp,
+    totalStart: baselineTotal,
+    daysSinceStart: daysSinceStart,
+    
+    // 持仓不动策略
+    buyAndHoldStrategy: {
+      name: '持仓不动策略',
+      description: '从策略开始时的持仓数量保持不变，只受价格波动影响',
+      totalNow: buyAndHoldTotal,
+      deltaTotal: buyAndHoldReturn,
+      returnPercent: buyAndHoldReturnPercent,
+      annualizedReturn: buyAndHoldAnnualized * 100,
+      byAsset: buyAndHoldDetails
+    },
+    
+    // 自动平衡策略
+    rebalanceStrategy: {
+      name: '自动平衡策略',
+      description: '根据价格波动自动调整持仓比例，维持目标权重',
+      totalNow: currentTotal,
+      deltaTotal: rebalanceReturn,
+      returnPercent: rebalanceReturnPercent,
+      annualizedReturn: rebalanceAnnualized * 100,
+      byAsset: rebalanceDetails
+    },
+    
+    // 策略对比
+    comparison: {
+      outperformance: outperformance,
+      outperformancePercent: outperformancePercent,
+      betterStrategy: outperformance > 0 ? 'rebalance' : 'buyAndHold',
+      betterStrategyName: outperformance > 0 ? '自动平衡策略' : '持仓不动策略',
+      performanceGap: Math.abs(outperformance),
+      performanceGapPercent: Math.abs(outperformancePercent),
+      
+      // 风险调整后收益（简化版）
+      riskAdjustedReturn: {
+        buyAndHold: buyAndHoldReturnPercent / Math.max(1, Math.abs(buyAndHoldReturnPercent)),
+        rebalance: rebalanceReturnPercent / Math.max(1, Math.abs(rebalanceReturnPercent))
+      }
+    },
+    
+    // 总结
+    summary: {
+      message: outperformance > 0 
+        ? `自动平衡策略表现更好，超出持仓不动策略 ${outperformance.toFixed(2)} USDT (${outperformancePercent.toFixed(2)}%)`
+        : `持仓不动策略表现更好，超出自动平衡策略 ${Math.abs(outperformance).toFixed(2)} USDT (${Math.abs(outperformancePercent).toFixed(2)}%)`,
+      recommendation: outperformance > 0 
+        ? '建议继续使用自动平衡策略'
+        : '建议考虑持仓不动策略或调整平衡参数'
+    }
+  });
+});
+
+// 手续费配置管理
+const FEE_CONFIG_FILE = path.join(__dirname, 'fee_config.json');
+
+function readFeeConfig() {
+  try {
+    if (fs.existsSync(FEE_CONFIG_FILE)) {
+      const raw = fs.readFileSync(FEE_CONFIG_FILE, 'utf8');
+      return JSON.parse(raw || '{}');
+    }
+  } catch (e) {}
+  return { 
+    tradingFeePercent: 0.1, // 默认0.1%手续费
+    enabled: true 
+  };
+}
+
+function writeFeeConfig(cfg) {
+  try {
+    fs.writeFileSync(FEE_CONFIG_FILE, JSON.stringify(cfg, null, 2));
+    return true;
+  } catch (e) { 
+    return false; 
+  }
+}
+
+// 获取手续费配置
+app.get('/api/fee-config', (req, res) => {
+  const cfg = readFeeConfig();
+  res.json({ success: true, config: cfg });
+});
+
+// 更新手续费配置
+app.put('/api/fee-config', (req, res) => {
+  const { tradingFeePercent, enabled } = req.body || {};
+  const current = readFeeConfig();
+  const next = {
+    tradingFeePercent: tradingFeePercent !== undefined ? Number(tradingFeePercent) : current.tradingFeePercent,
+    enabled: enabled !== undefined ? !!enabled : current.enabled
+  };
+  
+  if (next.tradingFeePercent < 0 || next.tradingFeePercent > 10) {
+    return res.status(400).json({ success: false, error: '手续费百分比必须在0-10之间' });
+  }
+  
+  if (!writeFeeConfig(next)) {
+    return res.status(500).json({ success: false, error: '保存失败' });
+  }
+  res.json({ success: true, config: next });
+});
+
+// 计算手续费和实际盈利
+function calculateFeesAndNetProfit(groupId) {
+  const feeConfig = readFeeConfig();
+  const logs = readTradingLogs();
+  
+  // 筛选成功交易
+  const successfulTrades = logs.filter(log => 
+    log.groupId === groupId && 
+    log.status === 'success' && 
+    log.valueUSDT && 
+    log.valueUSDT > 0
+  );
+  
+  // 计算总交易额
+  const totalTradingVolume = successfulTrades.reduce((sum, log) => sum + Number(log.valueUSDT || 0), 0);
+  
+  // 计算手续费
+  const totalFees = feeConfig.enabled ? totalTradingVolume * (feeConfig.tradingFeePercent / 100) : 0;
+  
+  return {
+    totalTradingVolume,
+    totalFees,
+    tradingFeePercent: feeConfig.tradingFeePercent,
+    feeEnabled: feeConfig.enabled,
+    tradeCount: successfulTrades.length
+  };
+}
+
+// 获取带手续费的策略对比
+app.get('/api/groups/:groupId/strategy-comparison-with-fees', (req, res) => {
+  const data = readAssets();
+  const group = data.groups.find(g => g.id === req.params.groupId);
+  if (!group) return res.status(404).json({ success: false, error: '资产组不存在' });
+  const s = ensureGroupStrategy(group);
+  const baseline = s.baselineSnapshot;
+  if (!baseline) return res.json({ success: true, hasBaseline: false });
+  
+  const currentTotal = group.assets.reduce((sum, a) => sum + (Number(a.price || 0) * Number(a.quantity || 0)), 0);
+  const baselineMap = new Map((baseline.assets || []).map(a => [a.symbol, a]));
+  const baselineTotal = Number(baseline.totalValue || 0);
+  
+  // 计算手续费
+  const feeData = calculateFeesAndNetProfit(req.params.groupId);
+  
+  // 计算持仓不动策略
+  let buyAndHoldTotal = 0;
+  const buyAndHoldDetails = [];
+  
+  for (const a of group.assets) {
+    const b = baselineMap.get(a.symbol) || { quantity: 0, price: 0 };
+    const buyAndHoldValue = Number(b.quantity || 0) * Number(a.price || 0);
+    buyAndHoldTotal += buyAndHoldValue;
+    
+    const priceChange = Number(a.price || 0) - Number(b.price || 0);
+    const priceChangePercent = Number(b.price || 0) > 0 ? (priceChange / Number(b.price || 0)) * 100 : 0;
+    
+    buyAndHoldDetails.push({
+      symbol: a.symbol,
+      quantity: Number(b.quantity || 0),
+      priceStart: Number(b.price || 0),
+      priceNow: Number(a.price || 0),
+      priceChange: priceChange,
+      priceChangePercent: priceChangePercent,
+      valueStart: Number(b.quantity || 0) * Number(b.price || 0),
+      valueNow: buyAndHoldValue,
+      deltaValue: buyAndHoldValue - (Number(b.quantity || 0) * Number(b.price || 0))
+    });
+  }
+  
+  // 计算自动平衡策略
+  const rebalanceDetails = [];
+  for (const a of group.assets) {
+    const b = baselineMap.get(a.symbol) || { quantity: 0, price: 0 };
+    const currentValue = Number(a.quantity || 0) * Number(a.price || 0);
+    const baselineValue = Number(b.quantity || 0) * Number(b.price || 0);
+    
+    rebalanceDetails.push({
+      symbol: a.symbol,
+      quantityStart: Number(b.quantity || 0),
+      quantityNow: Number(a.quantity || 0),
+      deltaQuantity: Number(a.quantity || 0) - Number(b.quantity || 0),
+      priceStart: Number(b.price || 0),
+      priceNow: Number(a.price || 0),
+      valueStart: baselineValue,
+      valueNow: currentValue,
+      deltaValue: currentValue - baselineValue
+    });
+  }
+  
+  // 计算总体对比
+  const buyAndHoldReturn = buyAndHoldTotal - baselineTotal;
+  const rebalanceReturn = currentTotal - baselineTotal;
+  const buyAndHoldReturnPercent = baselineTotal > 0 ? (buyAndHoldReturn / baselineTotal) * 100 : 0;
+  const rebalanceReturnPercent = baselineTotal > 0 ? (rebalanceReturn / baselineTotal) * 100 : 0;
+  
+  // 计算扣除手续费后的实际收益
+  const rebalanceNetReturn = rebalanceReturn - feeData.totalFees;
+  const rebalanceNetReturnPercent = baselineTotal > 0 ? (rebalanceNetReturn / baselineTotal) * 100 : 0;
+  
+  const outperformance = rebalanceNetReturn - buyAndHoldReturn;
+  const outperformancePercent = baselineTotal > 0 ? (outperformance / baselineTotal) * 100 : 0;
+  
+  // 计算年化收益率
+  const daysSinceStart = Math.floor((new Date() - new Date(baseline.timestamp)) / (1000 * 60 * 60 * 24));
+  const yearsSinceStart = daysSinceStart / 365.25;
+  const buyAndHoldAnnualized = yearsSinceStart > 0 ? Math.pow(1 + buyAndHoldReturnPercent / 100, 1 / yearsSinceStart) - 1 : 0;
+  const rebalanceAnnualized = yearsSinceStart > 0 ? Math.pow(1 + rebalanceNetReturnPercent / 100, 1 / yearsSinceStart) - 1 : 0;
+  
+  res.json({
+    success: true,
+    hasBaseline: true,
+    baselineAt: baseline.timestamp,
+    totalStart: baselineTotal,
+    daysSinceStart: daysSinceStart,
+    
+    // 手续费信息
+    feeInfo: {
+      totalTradingVolume: feeData.totalTradingVolume,
+      totalFees: feeData.totalFees,
+      tradingFeePercent: feeData.tradingFeePercent,
+      feeEnabled: feeData.feeEnabled,
+      tradeCount: feeData.tradeCount
+    },
+    
+    // 持仓不动策略
+    buyAndHoldStrategy: {
+      name: '持仓不动策略',
+      description: '从策略开始时的持仓数量保持不变，只受价格波动影响',
+      totalNow: buyAndHoldTotal,
+      deltaTotal: buyAndHoldReturn,
+      returnPercent: buyAndHoldReturnPercent,
+      annualizedReturn: buyAndHoldAnnualized * 100,
+      byAsset: buyAndHoldDetails
+    },
+    
+    // 自动平衡策略（扣除手续费）
+    rebalanceStrategy: {
+      name: '自动平衡策略',
+      description: '根据价格波动自动调整持仓比例，维持目标权重',
+      totalNow: currentTotal,
+      grossReturn: rebalanceReturn,
+      grossReturnPercent: rebalanceReturnPercent,
+      netReturn: rebalanceNetReturn,
+      netReturnPercent: rebalanceNetReturnPercent,
+      annualizedReturn: rebalanceAnnualized * 100,
+      byAsset: rebalanceDetails
+    },
+    
+    // 策略对比
+    comparison: {
+      outperformance: outperformance,
+      outperformancePercent: outperformancePercent,
+      betterStrategy: outperformance > 0 ? 'rebalance' : 'buyAndHold',
+      betterStrategyName: outperformance > 0 ? '自动平衡策略' : '持仓不动策略',
+      performanceGap: Math.abs(outperformance),
+      performanceGapPercent: Math.abs(outperformancePercent)
+    },
+    
+    // 总结
+    summary: {
+      message: outperformance > 0 
+        ? `自动平衡策略表现更好，扣除手续费后超出持仓不动策略 ${outperformance.toFixed(2)} USDT (${outperformancePercent.toFixed(2)}%)`
+        : `持仓不动策略表现更好，超出自动平衡策略 ${Math.abs(outperformance).toFixed(2)} USDT (${Math.abs(outperformancePercent).toFixed(2)}%)`,
+      recommendation: outperformance > 0 
+        ? '建议继续使用自动平衡策略'
+        : '建议考虑持仓不动策略或调整平衡参数'
+    }
   });
 });
 

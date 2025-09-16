@@ -30,6 +30,8 @@
 - **状态跟踪**: 成功/失败状态可视化
 - **时间戳**: 详细的交易时间记录
 - **日志管理**: 支持查看和清空交易日志
+- **Python集成**: 完整的命令行交易工具
+- **策略执行**: 自动策略交易记录
 
 ## 🚀 技术架构
 
@@ -120,7 +122,9 @@ pip install requests
 3. 点击"开启策略"启动自动交易
 4. 在"交易记录"查看策略执行结果
 
-### Python命令行工具
+### 🐍 Python命令行工具
+
+MoneyManager提供了完整的Python命令行工具，支持所有交易功能：
 
 **搜索合约:**
 ```bash
@@ -142,6 +146,11 @@ python bitget_api.py --api-key YOUR_KEY --secret-key YOUR_SECRET --passphrase YO
 python bitget_api.py --api-key YOUR_KEY --secret-key YOUR_SECRET --passphrase YOUR_PASS market BTC buy 0.001
 ```
 
+**下限价单:**
+```bash
+python bitget_api.py --api-key YOUR_KEY --secret-key YOUR_SECRET --passphrase YOUR_PASS limit BTC buy 0.001 50000
+```
+
 **自动交易:**
 ```bash
 python bitget_api.py --api-key YOUR_KEY --secret-key YOUR_SECRET --passphrase YOUR_PASS auto-trade --assets-file assets.json
@@ -150,6 +159,11 @@ python bitget_api.py --api-key YOUR_KEY --secret-key YOUR_SECRET --passphrase YO
 **查看交易日志:**
 ```bash
 python bitget_api.py --api-key YOUR_KEY --secret-key YOUR_SECRET --passphrase YOUR_PASS log --limit 10
+```
+
+**清空交易日志:**
+```bash
+python bitget_api.py --api-key YOUR_KEY --secret-key YOUR_SECRET --passphrase YOUR_PASS clear-logs
 ```
 
 ## 📁 项目结构
@@ -168,7 +182,15 @@ moneymanager/
 ├── bitget_contracts_cache.json  # Bitget合约缓存
 ├── bitget_config.json    # Bitget配置文件
 ├── api_examples.json     # API使用示例
-└── package.json          # Node.js依赖
+├── fee_config.json       # 手续费配置
+├── test_ui_features.js   # UI功能测试
+├── test_strategy_comparison.js  # 策略对比测试
+├── test_fix.js           # 修复测试
+├── server.log            # 服务器日志
+├── package.json          # Node.js依赖
+├── package-lock.json     # 依赖锁定文件
+├── README.md             # 项目说明文档
+└── .gitignore           # Git忽略文件
 ```
 
 ## 🔧 API接口
@@ -230,14 +252,17 @@ moneymanager/
 - **Python**: 高性能交易算法和API调用
 - **JSON文件存储**: 本地数据持久化
 
-### 最近更新 (v2.0)
-- ✅ Bitget API全面升级
-- ✅ 支持所有USDT永续合约
-- ✅ 智能合约搜索功能
-- ✅ 逐仓保证金模式
-- ✅ 合约信息缓存机制
-- ✅ 自动数量精度调整
-- ✅ 策略保护机制
+### 最近更新 (v2.1)
+- ✅ 完整的Python交易API支持
+- ✅ 命令行工具集成
+- ✅ 自动交易策略优化
+- ✅ 交易日志系统完善
+- ✅ 错误处理和重试机制
+- ✅ 合约信息本地缓存优化
+- ✅ 多资产组策略管理
+- ✅ 实时价格更新机制
+- ✅ 交易状态可视化
+- ✅ 配置管理优化
 
 ### 计划功能
 - [ ] WebSocket实时价格推送
