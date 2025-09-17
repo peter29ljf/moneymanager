@@ -12,6 +12,76 @@ const DATA_FILE = path.join(__dirname, 'assets.json');
 const TRADING_LOG_FILE = path.join(__dirname, 'trading_logs.json');
 const BITGET_CFG_FILE = path.join(__dirname, 'bitget_config.json');
 
+// 全局错误处理
+process.on('uncaughtException', (error) => {
+  console.error('未捕获的异常:', error);
+  console.error('堆栈跟踪:', error.stack);
+  // 不退出进程，而是记录错误并继续运行
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('未处理的Promise拒绝:', reason);
+  console.error('Promise:', promise);
+  // 不退出进程，而是记录错误并继续运行
+});
+
+// 优雅关闭处理
+process.on('SIGTERM', () => {
+  console.log('收到SIGTERM信号，开始优雅关闭...');
+  gracefulShutdown();
+});
+
+process.on('SIGINT', () => {
+  console.log('收到SIGINT信号，开始优雅关闭...');
+  gracefulShutdown();
+});
+
+function gracefulShutdown() {
+  console.log('清理定时器...');
+  // 清理所有策略定时器
+  for (const [groupId, timer] of STRATEGY_TIMERS) {
+    clearInterval(timer);
+    console.log(`已清理组 ${groupId} 的定时器`);
+  }
+  STRATEGY_TIMERS.clear();
+  
+  console.log('服务器已优雅关闭');
+  process.exit(0);
+}
+
+// 内存监控
+function startMemoryMonitor() {
+  setInterval(() => {
+    const memUsage = process.memoryUsage();
+    const memMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+    const memTotal = Math.round(memUsage.heapTotal / 1024 / 1024);
+    
+    // 如果内存使用超过500MB，记录警告
+    if (memMB > 500) {
+      console.warn(`内存使用警告: ${memMB}MB / ${memTotal}MB`);
+    }
+    
+    // 如果内存使用超过800MB，清理定时器并重启策略
+    if (memMB > 800) {
+      console.warn(`内存使用过高: ${memMB}MB，清理定时器...`);
+      for (const [groupId, timer] of STRATEGY_TIMERS) {
+        clearInterval(timer);
+      }
+      STRATEGY_TIMERS.clear();
+      
+      // 重新启动策略定时器
+      setTimeout(() => {
+        const data = readAssets();
+        for (const g of data.groups || []) {
+          const s = ensureGroupStrategy(g);
+          if (s.enabled) startStrategyTimer(g.id);
+        }
+        console.log('策略定时器已重新启动');
+      }, 5000);
+    }
+  }, 60000); // 每分钟检查一次
+}
+
 app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -391,21 +461,32 @@ app.delete('/api/assets/stocks/:id', (req, res) => {
 });
 
 // 工具: 简单的 https GET JSON
-function httpsGetJson(url) {
+function httpsGetJson(url, timeout = 10000) {
   return new Promise((resolve, reject) => {
-    https
-      .get(url, (resp) => {
-        let data = '';
-        resp.on('data', (chunk) => (data += chunk));
-        resp.on('end', () => {
-          try {
-            resolve(JSON.parse(data || '{}'));
-          } catch (e) {
-            reject(new Error('解析 JSON 失败'));
-          }
-        });
-      })
-      .on('error', (err) => reject(err));
+    const request = https.get(url, (resp) => {
+      let data = '';
+      resp.on('data', (chunk) => (data += chunk));
+      resp.on('end', () => {
+        try {
+          resolve(JSON.parse(data || '{}'));
+        } catch (e) {
+          console.error('解析JSON失败:', e.message, 'URL:', url);
+          reject(new Error('解析 JSON 失败'));
+        }
+      });
+    });
+    
+    // 设置超时
+    request.setTimeout(timeout, () => {
+      request.destroy();
+      console.error('请求超时:', url);
+      reject(new Error('请求超时'));
+    });
+    
+    request.on('error', (err) => {
+      console.error('网络请求错误:', err.message, 'URL:', url);
+      reject(err);
+    });
   });
 }
 
@@ -436,13 +517,19 @@ function isStockSymbol(symbol) {
 }
 
 async function fetchBitgetV1TickerLast(symbol) {
-  const url = `https://api.bitget.com/api/mix/v1/market/ticker?symbol=${encodeURIComponent(symbol)}`;
-  const json = await httpsGetJson(url);
-  if (json && json.code === '00000' && json.data && json.data.last) {
-    const price = parseFloat(json.data.last);
-    if (!isNaN(price) && price > 0) return price;
+  try {
+    const url = `https://api.bitget.com/api/mix/v1/market/ticker?symbol=${encodeURIComponent(symbol)}`;
+    const json = await httpsGetJson(url, 5000); // 5秒超时
+    if (json && json.code === '00000' && json.data && json.data.last) {
+      const price = parseFloat(json.data.last);
+      if (!isNaN(price) && price > 0) return price;
+    }
+    console.warn(`获取${symbol}行情失败:`, json?.msg || '未知错误');
+    return null; // 返回null而不是抛出异常
+  } catch (error) {
+    console.error(`获取${symbol}行情异常:`, error.message);
+    return null; // 返回null而不是抛出异常
   }
-  throw new Error('获取行情失败');
 }
 
 // 刷新指定资产组内所有资产的价格（Bitget v1 ticker）
@@ -458,10 +545,15 @@ app.post('/api/groups/:groupId/refresh-prices', async (req, res) => {
       if (!asset.symbol) continue;
       try {
         const last = await fetchBitgetV1TickerLast(asset.symbol);
-        asset.price = last;
-        asset.updatedAt = new Date().toISOString();
-        updatedCount += 1;
+        if (last !== null) {
+          asset.price = last;
+          asset.updatedAt = new Date().toISOString();
+          updatedCount += 1;
+        } else {
+          console.warn(`跳过更新${asset.symbol}价格（获取失败）`);
+        }
       } catch (e) {
+        console.error(`更新${asset.symbol}价格时发生异常:`, e.message);
         // 忽略单个失败，继续
       }
       // 轻微延迟，降低风控触发
@@ -499,7 +591,14 @@ async function runRebalanceOnce(groupId) {
   // 刷新价格
   for (const a of group.assets) {
     if (!a.symbol) continue;
-    try { a.price = await fetchBitgetV1TickerLast(a.symbol); } catch (_) {}
+    try { 
+      const price = await fetchBitgetV1TickerLast(a.symbol);
+      if (price !== null) {
+        a.price = price;
+      }
+    } catch (error) {
+      console.error(`刷新${a.symbol}价格失败:`, error.message);
+    }
     await new Promise(r => setTimeout(r, 120));
   }
   // 总市值
@@ -1507,6 +1606,11 @@ function generateSmartPrice(symbol) {
 
 app.listen(PORT, () => {
   console.log(`Asset Manager server running on http://localhost:${PORT}`);
+  
+  // 启动内存监控
+  startMemoryMonitor();
+  console.log('内存监控已启动');
+  
   // 服务启动时恢复已开启策略的定时器
   try {
     const data = readAssets();
@@ -1514,5 +1618,8 @@ app.listen(PORT, () => {
       const s = ensureGroupStrategy(g);
       if (s.enabled) startStrategyTimer(g.id);
     }
-  } catch (_) {}
+    console.log('策略定时器已恢复');
+  } catch (error) {
+    console.error('恢复策略定时器失败:', error.message);
+  }
 });

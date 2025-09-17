@@ -84,6 +84,46 @@ npm start
 4. **访问系统**
 打开浏览器访问: http://localhost:3000
 
+### 系统服务配置（推荐）
+
+为了确保服务器稳定运行，建议配置为系统服务：
+
+1. **安装系统服务**
+```bash
+# 复制服务文件
+sudo cp moneymanager.service /etc/systemd/system/
+
+# 重新加载系统服务
+sudo systemctl daemon-reload
+
+# 启用开机自启动
+sudo systemctl enable moneymanager.service
+
+# 启动服务
+sudo systemctl start moneymanager.service
+```
+
+2. **服务管理命令**
+```bash
+# 查看服务状态
+sudo systemctl status moneymanager.service
+
+# 停止服务
+sudo systemctl stop moneymanager.service
+
+# 重启服务
+sudo systemctl restart moneymanager.service
+
+# 查看服务日志
+sudo journalctl -u moneymanager.service -f
+```
+
+3. **服务特性**
+- 自动重启：服务崩溃时自动重启
+- 内存限制：限制最大内存使用1GB
+- 开机自启：系统启动时自动启动服务
+- 日志记录：完整的系统日志记录
+
 ### Python交易功能设置
 
 1. **安装Python依赖**
@@ -252,17 +292,26 @@ moneymanager/
 - **Python**: 高性能交易算法和API调用
 - **JSON文件存储**: 本地数据持久化
 
-### 最近更新 (v2.1)
-- ✅ 完整的Python交易API支持
-- ✅ 命令行工具集成
-- ✅ 自动交易策略优化
-- ✅ 交易日志系统完善
-- ✅ 错误处理和重试机制
-- ✅ 合约信息本地缓存优化
-- ✅ 多资产组策略管理
-- ✅ 实时价格更新机制
-- ✅ 交易状态可视化
-- ✅ 配置管理优化
+### 最近更新 (v2.2)
+- ✅ **服务器稳定性大幅提升**
+  - 添加全局错误处理机制，防止未捕获异常导致崩溃
+  - 实现优雅关闭和自动重启功能
+  - 添加内存监控和自动恢复机制
+  - 创建系统服务，支持开机自启动
+- ✅ **网络请求优化**
+  - 添加请求超时机制（10秒）
+  - 改进错误日志记录和异常处理
+  - 价格获取失败时优雅降级处理
+- ✅ **完整的Python交易API支持**
+- ✅ **命令行工具集成**
+- ✅ **自动交易策略优化**
+- ✅ **交易日志系统完善**
+- ✅ **错误处理和重试机制**
+- ✅ **合约信息本地缓存优化**
+- ✅ **多资产组策略管理**
+- ✅ **实时价格更新机制**
+- ✅ **交易状态可视化**
+- ✅ **配置管理优化**
 
 ### 计划功能
 - [ ] WebSocket实时价格推送

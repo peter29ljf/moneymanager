@@ -54,6 +54,24 @@ portfolio_analysis.json
 bitget_config.json
 bitget_contracts_cache.json
 
+# Server logs and runtime files
+server.log
+*.log
+
+# System service files (should be configured locally)
+moneymanager.service
+
+# Python virtual environment
+venv/
+env/
+.env
+
+# Test files and temporary data
+test_*.js
+*_test_*.json
+*_report_*.json
+*_migration_*.json
+
 # Test and debug files
 test_*.py
 debug_*.py
