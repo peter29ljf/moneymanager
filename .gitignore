@@ -53,6 +53,8 @@ portfolio_analysis.json
 # Bitget API related files
 bitget_config.json
 bitget_contracts_cache.json
+exchange_config.json
+exchange_config.local.json
 
 # Server logs and runtime files
 server.log
