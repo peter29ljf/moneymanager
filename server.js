@@ -5,12 +5,50 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const { spawn } = require('child_process');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = 3000;
 const DATA_FILE = path.join(__dirname, 'assets.json');
 const TRADING_LOG_FILE = path.join(__dirname, 'trading_logs.json');
 const BITGET_CFG_FILE = path.join(__dirname, 'bitget_config.json');
+const EXCHANGE_CFG_FILE = path.join(__dirname, 'exchange_config.json');
+
+const DEFAULT_BITGET_CFG = Object.freeze({
+  apiKey: '',
+  secretKey: '',
+  passphrase: '',
+  sandbox: false
+});
+
+const DEFAULT_ASTER_CFG = Object.freeze({
+  apiKey: '',
+  secretKey: '',
+  recvWindow: 5000,
+  defaultLeverage: 3,
+  marginType: 'CROSSED',
+  positionMode: 'ONE_WAY'
+});
+
+const ASTER_API_BASE = 'https://fapi.asterdex.com';
+const ASTER_SYMBOL_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+let ASTER_SYMBOL_CACHE = {
+  updatedAt: 0,
+  symbols: [],
+  map: new Map()
+};
+
+function clone(obj) {
+  return JSON.parse(JSON.stringify(obj));
+}
+
+function buildDefaultExchangeConfig() {
+  return {
+    activeExchange: 'sandbox', // preserved for backward compatibility (used as default only)
+    bitget: clone(DEFAULT_BITGET_CFG),
+    aster: clone(DEFAULT_ASTER_CFG)
+  };
+}
 
 // 全局错误处理
 process.on('uncaughtException', (error) => {
@@ -97,16 +135,20 @@ function readAssets() {
       if (parsed && !parsed.groups && (parsed.crypto || parsed.stocks)) {
         const legacyCrypto = Array.isArray(parsed.crypto) ? parsed.crypto : [];
         const legacyStocks = Array.isArray(parsed.stocks) ? parsed.stocks : [];
-        const merged = [...legacyCrypto, ...legacyStocks].map(a => ({
-          id: a.id || Date.now().toString(),
-          name: a.name,
-          quantity: a.quantity || 0,
-          // 旧资产没有 Bitget 合约符号，保留价格用于初始显示
-          price: typeof a.price === 'number' ? a.price : 0,
-          symbol: a.symbol || null,
-          createdAt: a.createdAt || new Date().toISOString(),
-          updatedAt: a.updatedAt || undefined
-        }));
+        const merged = [...legacyCrypto, ...legacyStocks].map(a => {
+          const uq = Number(a && a.unrealizedQuantity);
+          return {
+            id: a.id || Date.now().toString(),
+            name: a.name,
+            quantity: a.quantity || 0,
+            unrealizedQuantity: Number.isFinite(uq) ? uq : 0,
+            // 旧资产没有 Bitget 合约符号，保留价格用于初始显示
+            price: typeof a.price === 'number' ? a.price : 0,
+            symbol: a.symbol || null,
+            createdAt: a.createdAt || new Date().toISOString(),
+            updatedAt: a.updatedAt || undefined
+          };
+        });
 
         return {
           groups: [
@@ -122,6 +164,16 @@ function readAssets() {
 
       // 新结构
       if (parsed && Array.isArray(parsed.groups)) {
+        for (const group of parsed.groups) {
+          if (group && Array.isArray(group.assets)) {
+            for (const asset of group.assets) {
+              if (asset && typeof asset === 'object') {
+                const uq = Number(asset.unrealizedQuantity);
+                asset.unrealizedQuantity = Number.isFinite(uq) ? uq : 0;
+              }
+            }
+          }
+        }
         return parsed;
       }
     }
@@ -165,21 +217,513 @@ function appendTradingLog(entry) {
   }
 }
 
-function readBitgetCfg() {
-  try {
-    if (fs.existsSync(BITGET_CFG_FILE)) {
-      const raw = fs.readFileSync(BITGET_CFG_FILE, 'utf8');
-      return JSON.parse(raw || '{}');
-    }
-  } catch (e) {}
-  return { apiKey: '', secretKey: '', passphrase: '', sandbox: false };
+function parseBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    return ['true', '1', 'yes', 'on'].includes(normalized);
+  }
+  return false;
 }
 
-function writeBitgetCfg(cfg) {
+function normalizeBitgetConfig(cfg) {
+  const base = clone(DEFAULT_BITGET_CFG);
+  if (!cfg || typeof cfg !== 'object') return base;
+  if (cfg.apiKey !== undefined) base.apiKey = String(cfg.apiKey || '').trim();
+  if (cfg.secretKey !== undefined) base.secretKey = String(cfg.secretKey || '').trim();
+  if (cfg.passphrase !== undefined) base.passphrase = String(cfg.passphrase || '').trim();
+  if (cfg.sandbox !== undefined) base.sandbox = parseBoolean(cfg.sandbox);
+  return base;
+}
+
+function normalizeAsterConfig(cfg) {
+  const base = clone(DEFAULT_ASTER_CFG);
+  if (!cfg || typeof cfg !== 'object') return base;
+  if (cfg.apiKey !== undefined) base.apiKey = String(cfg.apiKey || '').trim();
+  if (cfg.secretKey !== undefined) base.secretKey = String(cfg.secretKey || '').trim();
+  if (cfg.recvWindow !== undefined) {
+    const num = Number(cfg.recvWindow);
+    if (!Number.isNaN(num) && num > 0) base.recvWindow = Math.floor(num);
+  }
+  if (cfg.defaultLeverage !== undefined) {
+    const lev = Number.parseInt(cfg.defaultLeverage, 10);
+    if (!Number.isNaN(lev) && lev >= 1 && lev <= 125) {
+      base.defaultLeverage = lev;
+    }
+  }
+  if (cfg.marginType !== undefined) {
+    const mt = String(cfg.marginType || '').trim().toUpperCase();
+    if (['ISOLATED', 'CROSSED'].includes(mt)) {
+      base.marginType = mt;
+    }
+  }
+  if (cfg.positionMode !== undefined) {
+    const pm = String(cfg.positionMode || '').trim().toUpperCase();
+    if (['ONE_WAY', 'HEDGE'].includes(pm)) {
+      base.positionMode = pm;
+    }
+  }
+  return base;
+}
+
+function readExchangeConfig() {
+  const defaults = buildDefaultExchangeConfig();
   try {
-    fs.writeFileSync(BITGET_CFG_FILE, JSON.stringify(cfg, null, 2));
+    if (fs.existsSync(EXCHANGE_CFG_FILE)) {
+      const raw = fs.readFileSync(EXCHANGE_CFG_FILE, 'utf8');
+      if (!raw) return defaults;
+      const parsed = JSON.parse(raw);
+      const activeCandidate = typeof parsed.activeExchange === 'string'
+        ? parsed.activeExchange.toLowerCase()
+        : defaults.activeExchange;
+      const activeExchange = ['bitget', 'aster', 'sandbox'].includes(activeCandidate)
+        ? activeCandidate
+        : defaults.activeExchange;
+      const bitgetSection = (parsed.bitget && typeof parsed.bitget === 'object')
+        ? parsed.bitget
+        : {
+            apiKey: parsed.apiKey,
+            secretKey: parsed.secretKey,
+            passphrase: parsed.passphrase,
+            sandbox: parsed.sandbox
+          };
+      const asterSection = (parsed.aster && typeof parsed.aster === 'object') ? parsed.aster : {};
+      return {
+        activeExchange,
+        bitget: normalizeBitgetConfig(bitgetSection),
+        aster: normalizeAsterConfig(asterSection)
+      };
+    }
+
+    if (fs.existsSync(BITGET_CFG_FILE)) {
+      const raw = fs.readFileSync(BITGET_CFG_FILE, 'utf8');
+      const legacy = raw ? JSON.parse(raw) : {};
+      const migrated = {
+        activeExchange: 'bitget',
+        bitget: normalizeBitgetConfig(legacy),
+        aster: clone(DEFAULT_ASTER_CFG)
+      };
+      writeExchangeConfig(migrated);
+      return migrated;
+    }
+  } catch (error) {
+    console.error('读取交易所配置失败:', error);
+  }
+  return defaults;
+}
+
+function writeExchangeConfig(nextCfg) {
+  const defaults = buildDefaultExchangeConfig();
+  const activeCandidate = typeof nextCfg?.activeExchange === 'string'
+    ? nextCfg.activeExchange.toLowerCase()
+    : defaults.activeExchange;
+  const normalized = {
+    activeExchange: ['aster', 'bitget', 'sandbox'].includes(activeCandidate) ? activeCandidate : defaults.activeExchange,
+    bitget: normalizeBitgetConfig(nextCfg?.bitget ?? nextCfg?.bitgetCfg),
+    aster: normalizeAsterConfig(nextCfg?.aster ?? nextCfg?.asterCfg)
+  };
+  try {
+    fs.writeFileSync(EXCHANGE_CFG_FILE, JSON.stringify(normalized, null, 2));
     return true;
-  } catch (e) { return false; }
+  } catch (error) {
+    console.error('写入交易所配置失败:', error);
+    return false;
+  }
+}
+
+function readBitgetCfg() {
+  const cfg = readExchangeConfig();
+  return normalizeBitgetConfig(cfg.bitget);
+}
+
+function writeBitgetCfg(patch) {
+  const current = readExchangeConfig();
+  const merged = { ...current.bitget, ...(patch || {}) };
+  return writeExchangeConfig({ ...current, bitget: normalizeBitgetConfig(merged) });
+}
+
+function readAsterCfg() {
+  const cfg = readExchangeConfig();
+  return normalizeAsterConfig(cfg.aster);
+}
+
+function writeAsterCfg(patch) {
+  const current = readExchangeConfig();
+  const merged = { ...current.aster, ...(patch || {}) };
+  return writeExchangeConfig({ ...current, aster: normalizeAsterConfig(merged) });
+}
+
+function getExchangeRuntimeConfig() {
+  const cfg = readExchangeConfig();
+  return {
+    activeExchange: cfg.activeExchange || 'sandbox',
+    bitget: normalizeBitgetConfig(cfg.bitget),
+    aster: normalizeAsterConfig(cfg.aster)
+  };
+}
+
+function setActiveExchange(exchange) {
+  if (typeof exchange !== 'string') return false;
+  const normalized = exchange.toLowerCase();
+  if (!['bitget', 'aster', 'sandbox'].includes(normalized)) return false;
+  const current = readExchangeConfig();
+  return writeExchangeConfig({ ...current, activeExchange: normalized });
+}
+
+function maskSensitive(value, left = 3, right = 3) {
+  if (!value) return '';
+  const s = String(value);
+  if (s.length <= left + right) {
+    return '*'.repeat(Math.max(3, s.length));
+  }
+  return s.slice(0, left) + '*'.repeat(Math.max(3, s.length - left - right)) + s.slice(-right);
+}
+
+function normalizeTradeExchange(value) {
+  if (!value) return null;
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === 'bitget' || normalized === 'aster') return normalized;
+  return null;
+}
+
+function hasBitgetCredentials(cfg) {
+  return !!(cfg && cfg.apiKey && cfg.secretKey && cfg.passphrase);
+}
+
+function hasAsterCredentials(cfg) {
+  return !!(cfg && cfg.apiKey && cfg.secretKey);
+}
+
+function getAssetTradeExchange(asset, runtimeCfg) {
+  if (!asset) return null;
+  const bitgetCfg = runtimeCfg.bitget;
+  const asterCfg = runtimeCfg.aster;
+  const canBitget = hasBitgetCredentials(bitgetCfg);
+  const canAster = hasAsterCredentials(asterCfg);
+
+  const preference = normalizeTradeExchange(asset.tradeExchange || asset.exchangePreference || asset.exchange);
+  if (preference === 'bitget' && canBitget) return 'bitget';
+  if (preference === 'aster' && canAster) return 'aster';
+
+  const symbols = asset.exchangeSymbols || {};
+  const hasBitgetSymbol = !!symbols.bitget || (asset.symbol && asset.symbol.endsWith('_UMCBL'));
+  const hasAsterSymbol = !!symbols.aster;
+
+  if (!preference) {
+    if (hasBitgetSymbol && !hasAsterSymbol && canBitget) return 'bitget';
+    if (hasAsterSymbol && !hasBitgetSymbol && canAster) return 'aster';
+  }
+
+  if (preference === 'bitget' && !canBitget && canAster && hasAsterSymbol) return 'aster';
+  if (preference === 'aster' && !canAster && canBitget && hasBitgetSymbol) return 'bitget';
+
+  if (hasBitgetSymbol && canBitget && !preference) {
+    // special handling: if asset symbol ends with _UMCBL but user might want aster (e.g. stored 1:1), prefer aster only if no bitget credentials
+    if (!canAster || !hasAsterSymbol) return 'bitget';
+  }
+
+  if (hasAsterSymbol && canAster && !preference) return 'aster';
+  if (hasBitgetSymbol && canBitget) return 'bitget';
+  if (hasAsterSymbol && canAster) return 'aster';
+  if (canBitget) return 'bitget';
+  if (canAster) return 'aster';
+  return null;
+}
+
+function deriveBitgetSymbol(symbol) {
+  if (!symbol) return null;
+  const upper = String(symbol).trim().toUpperCase();
+  if (upper.endsWith('_UMCBL') || upper.endsWith('_CMCBL')) return upper;
+  if (upper.endsWith('USDT')) return `${upper}_UMCBL`;
+  if (upper.includes('_')) return upper;
+  return `${upper}USDT_UMCBL`;
+}
+
+function deriveAsterSymbol(symbol) {
+  if (!symbol) return null;
+  const upper = String(symbol).trim().toUpperCase();
+  if (upper.endsWith('_UMCBL')) return upper.slice(0, -7);
+  if (upper.endsWith('_CMCBL')) return upper.slice(0, -7);
+  return upper.replace(/[^A-Z0-9]/g, '');
+}
+
+function normalizeExchangeSymbolsPayload(raw, fallbackSymbol) {
+  const normalized = { bitget: null, aster: null };
+  if (raw && typeof raw === 'object') {
+    if (raw.bitget) normalized.bitget = deriveBitgetSymbol(raw.bitget);
+    if (raw.aster) normalized.aster = deriveAsterSymbol(raw.aster);
+  }
+  if (!normalized.bitget && fallbackSymbol) {
+    normalized.bitget = deriveBitgetSymbol(fallbackSymbol);
+  }
+  if (!normalized.aster && normalized.bitget) {
+    normalized.aster = deriveAsterSymbol(normalized.bitget);
+  }
+  return normalized;
+}
+
+function getAssetExchangeSymbols(asset) {
+  if (!asset || typeof asset !== 'object') return { bitget: null, aster: null };
+  const symbols = normalizeExchangeSymbolsPayload(asset.exchangeSymbols, asset.symbol);
+  if (!symbols.bitget && asset.symbol) symbols.bitget = deriveBitgetSymbol(asset.symbol);
+  if (!symbols.aster && symbols.bitget) symbols.aster = deriveAsterSymbol(symbols.bitget);
+  return symbols;
+}
+
+function getBitgetSymbolForAsset(asset) {
+  return getAssetExchangeSymbols(asset).bitget;
+}
+
+function getAsterSymbolForAsset(asset) {
+  return getAssetExchangeSymbols(asset).aster;
+}
+
+function getDecimalPlaces(stepSize) {
+  if (typeof stepSize === 'number') {
+    return getDecimalPlaces(stepSize.toString());
+  }
+  const str = String(stepSize || '');
+  const dot = str.indexOf('.');
+  if (dot === -1) return 0;
+  return str.length - dot - 1;
+}
+
+function floorToStep(value, stepSize, precision) {
+  const decimalsFromStep = getDecimalPlaces(stepSize);
+  const decimals = Math.min(10, Math.max(decimalsFromStep, typeof precision === 'number' ? precision : decimalsFromStep));
+  const factor = 10 ** decimals;
+  return Math.floor(value * factor) / factor;
+}
+
+async function ensureAsterExchangeInfo(force = false) {
+  if (!force && ASTER_SYMBOL_CACHE.symbols.length) {
+    const age = Date.now() - ASTER_SYMBOL_CACHE.updatedAt;
+    if (age < ASTER_SYMBOL_CACHE_TTL) {
+      return ASTER_SYMBOL_CACHE.symbols;
+    }
+  }
+  const data = await httpsGetJson(`${ASTER_API_BASE}/fapi/v1/exchangeInfo`, 10000);
+  if (!data || !Array.isArray(data.symbols)) {
+    throw new Error('获取 Aster 交易对信息失败');
+  }
+  const map = new Map();
+  for (const item of data.symbols) {
+    if (item && item.symbol) {
+      map.set(String(item.symbol).toUpperCase(), item);
+    }
+  }
+  ASTER_SYMBOL_CACHE = {
+    updatedAt: Date.now(),
+    symbols: data.symbols,
+    map
+  };
+  return ASTER_SYMBOL_CACHE.symbols;
+}
+
+function getAsterSymbolInfo(symbol) {
+  if (!symbol) return null;
+  const upper = String(symbol).toUpperCase();
+  return ASTER_SYMBOL_CACHE.map?.get(upper) || null;
+}
+
+function getAsterLotFilter(symbolInfo) {
+  if (!symbolInfo || !Array.isArray(symbolInfo.filters)) return null;
+  return symbolInfo.filters.find((f) => f && f.filterType === 'LOT_SIZE') || null;
+}
+
+function normalizeAsterOrderQuantity(symbol, quantity) {
+  const info = getAsterSymbolInfo(symbol);
+  if (!info) {
+    return {
+      qty: Number(quantity),
+      minQty: 0,
+      stepSize: null,
+      precision: 6
+    };
+  }
+  const lotFilter = getAsterLotFilter(info) || {};
+  const stepSize = lotFilter.stepSize || `1e-${info.quantityPrecision || 3}`;
+  const precision = Math.min(8, Math.max(getDecimalPlaces(stepSize), Number(info.quantityPrecision || 0)));
+  const floored = floorToStep(Number(quantity), stepSize, precision);
+  const minQty = Number(lotFilter.minQty || 0);
+  return {
+    qty: Number(floored.toFixed(precision)),
+    minQty,
+    stepSize,
+    precision
+  };
+}
+
+function isIgnorableAsterError(error, { codes = [], messageIncludes = [] } = {}) {
+  if (!error) return false;
+  const responseCode = typeof error.code === 'number' ? error.code : (error.response && typeof error.response.code === 'number' ? error.response.code : undefined);
+  if (typeof responseCode === 'number' && codes.includes(responseCode)) return true;
+  const message = (error.message || error.msg || error.response?.msg || '').toLowerCase();
+  if (!message) return false;
+  return messageIncludes.some((snippet) => message.includes(String(snippet).toLowerCase()));
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(id);
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    throw error;
+  }
+}
+
+async function asterSignedRequest(method, pathName, params = {}, cfg, timeoutMs = 10000) {
+  const config = cfg ? normalizeAsterConfig(cfg) : readAsterCfg();
+  if (!config.apiKey || !config.secretKey) {
+    const err = new Error('Aster API 未配置');
+    err.code = 'ASTER_CONFIG_MISSING';
+    throw err;
+  }
+
+  const methodUpper = String(method || 'GET').toUpperCase();
+  const searchParams = new URLSearchParams();
+  for (const [key, value] of Object.entries(params || {})) {
+    if (value === undefined || value === null || value === '') continue;
+    searchParams.append(key, String(value));
+  }
+  const recvWindow = config.recvWindow && Number.isFinite(config.recvWindow)
+    ? Math.max(1, Number(config.recvWindow))
+    : DEFAULT_ASTER_CFG.recvWindow;
+  searchParams.set('recvWindow', String(Math.floor(recvWindow)));
+  searchParams.set('timestamp', Date.now().toString());
+  const signature = crypto.createHmac('sha256', config.secretKey).update(searchParams.toString()).digest('hex');
+  searchParams.append('signature', signature);
+
+  const queryString = searchParams.toString();
+  const url = `${ASTER_API_BASE}${pathName}${['GET', 'DELETE'].includes(methodUpper) ? `?${queryString}` : ''}`;
+  const headers = { 'X-MBX-APIKEY': config.apiKey };
+  if (!['GET', 'DELETE'].includes(methodUpper)) {
+    headers['Content-Type'] = 'application/x-www-form-urlencoded';
+  }
+
+  let response;
+  try {
+    response = await fetchWithTimeout(url, {
+      method: methodUpper,
+      headers,
+      body: ['GET', 'DELETE'].includes(methodUpper) ? undefined : queryString
+    }, timeoutMs);
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      const timeoutError = new Error('Aster 请求超时');
+      timeoutError.code = 'ASTER_TIMEOUT';
+      throw timeoutError;
+    }
+    throw error;
+  }
+
+  const rawText = await response.text();
+  let data = {};
+  try {
+    data = rawText ? JSON.parse(rawText) : {};
+  } catch (error) {
+    const parseError = new Error('解析 Aster 响应失败');
+    parseError.raw = rawText;
+    throw parseError;
+  }
+
+  const code = typeof data?.code === 'number' ? data.code : (response.ok ? 0 : response.status);
+  if (!response.ok || (code !== 0 && code !== 200)) {
+    const err = new Error(data?.msg || `Aster 接口错误 (${response.status})`);
+    err.code = code;
+    err.status = response.status;
+    err.response = data;
+    throw err;
+  }
+
+  return data;
+}
+
+async function ensureAsterAccountSetup(symbol, cfg) {
+  const config = cfg ? normalizeAsterConfig(cfg) : readAsterCfg();
+  const tasks = [];
+  if (config.positionMode === 'ONE_WAY') {
+    tasks.push(
+      asterSignedRequest('POST', '/fapi/v1/positionSide/dual', { dualSidePosition: 'false' }, config)
+        .catch((err) => {
+          if (!isIgnorableAsterError(err, { codes: [-4059], messageIncludes: ['no need to change position side'] })) {
+            throw err;
+          }
+        })
+    );
+  } else if (config.positionMode === 'HEDGE') {
+    tasks.push(
+      asterSignedRequest('POST', '/fapi/v1/positionSide/dual', { dualSidePosition: 'true' }, config)
+        .catch((err) => {
+          if (!isIgnorableAsterError(err, { codes: [-4059], messageIncludes: ['no need to change position side'] })) {
+            throw err;
+          }
+        })
+    );
+  }
+
+  if (config.marginType) {
+    tasks.push(
+      asterSignedRequest('POST', '/fapi/v1/marginType', { symbol, marginType: config.marginType }, config)
+        .catch((err) => {
+          const message = String(err?.message || err?.response?.msg || '').toLowerCase();
+          const multiAssetsMsg = message.includes('multi-asset') || message.includes('multi asset');
+          if (config.marginType === 'ISOLATED' && multiAssetsMsg) {
+            console.warn('Aster 返回 Multi-Assets 模式不允许逐仓，自动切换为全仓。');
+            writeAsterCfg({ marginType: 'CROSSED' });
+            return;
+          }
+          if (!isIgnorableAsterError(err, { codes: [-4046], messageIncludes: ['no need to change margin type'] })) {
+            throw err;
+          }
+        })
+    );
+  }
+
+  if (config.defaultLeverage) {
+    tasks.push(
+      asterSignedRequest('POST', '/fapi/v1/leverage', { symbol, leverage: config.defaultLeverage }, config)
+        .catch((err) => {
+          if (!isIgnorableAsterError(err, { messageIncludes: ['no need to change leverage', 'same leverage'] })) {
+            throw err;
+          }
+        })
+    );
+  }
+
+  await Promise.all(tasks);
+}
+
+async function placeAsterMarketOrder({ symbol, side, quantity, config }) {
+  const normalizedSide = String(side || '').toUpperCase();
+  if (!['BUY', 'SELL'].includes(normalizedSide)) {
+    throw new Error('下单方向仅支持 BUY 或 SELL');
+  }
+  await ensureAsterExchangeInfo();
+  await ensureAsterAccountSetup(symbol, config);
+  const { qty, minQty, precision } = normalizeAsterOrderQuantity(symbol, quantity);
+  if (!(qty > 0)) {
+    throw new Error('下单数量过小');
+  }
+  if (minQty && qty < minQty) {
+    const err = new Error(`下单数量需不小于最小要求 ${minQty}`);
+    err.code = 'ASTER_MIN_QTY';
+    throw err;
+  }
+  const payload = {
+    symbol,
+    side: normalizedSide,
+    type: 'MARKET',
+    quantity: qty.toFixed(precision),
+    newClientOrderId: `mm_${Date.now()}`
+  };
+  const result = await asterSignedRequest('POST', '/fapi/v1/order', payload, config);
+  return { result, quantity: qty, precision };
 }
 
 // 兼容旧接口，返回旧格式（从第一资产组映射）
@@ -245,23 +789,47 @@ app.delete('/api/groups/:groupId', (req, res) => {
 
 app.post('/api/groups/:groupId/assets', (req, res) => {
   const { groupId } = req.params;
-  const { name, symbol, quantity, price } = req.body;
-  if (!name || !symbol || quantity === undefined) {
-    return res.status(400).json({ error: '名称、交易对(symbol)、数量必填' });
+  const { name, symbol, quantity, price, exchangeSymbols, tradeExchange } = req.body || {};
+  if (!name || quantity === undefined) {
+    return res.status(400).json({ error: '名称、数量必填' });
+  }
+  const normalizedSymbols = normalizeExchangeSymbolsPayload(exchangeSymbols, symbol);
+  if (!normalizedSymbols.bitget) {
+    return res.status(400).json({ error: '缺少有效的交易对标识' });
+  }
+  const bitgetSymbol = normalizedSymbols.bitget;
+  let preferredExchange = normalizeTradeExchange(tradeExchange);
+  if (!preferredExchange && exchangeSymbols && typeof exchangeSymbols === 'object') {
+    preferredExchange = normalizeTradeExchange(exchangeSymbols.tradeExchange || exchangeSymbols.preferred);
+  }
+  if (!preferredExchange && normalizedSymbols.aster && !normalizedSymbols.bitget) {
+    preferredExchange = 'aster';
+  }
+  if (!preferredExchange) {
+    preferredExchange = normalizedSymbols.bitget ? 'bitget' : null;
   }
   const data = readAssets();
   const group = data.groups.find(g => g.id === groupId);
   if (!group) {
     return res.status(404).json({ error: '资产组不存在' });
   }
+  const parsedQty = Number(quantity);
+  if (!Number.isFinite(parsedQty)) {
+    return res.status(400).json({ error: '数量必须为数字' });
+  }
   const newAsset = {
     id: `a_${Date.now()}`,
     name: String(name),
-    symbol: String(symbol).toUpperCase(),
-    quantity: parseFloat(quantity),
+    symbol: bitgetSymbol,
+    quantity: parsedQty,
+    unrealizedQuantity: 0,
     price: price !== undefined ? parseFloat(price) : 0,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    exchangeSymbols: normalizedSymbols
   };
+  if (preferredExchange) {
+    newAsset.tradeExchange = preferredExchange;
+  }
   group.assets.push(newAsset);
   if (writeAssets(data)) {
     res.status(201).json({ success: true, asset: newAsset });
@@ -272,15 +840,24 @@ app.post('/api/groups/:groupId/assets', (req, res) => {
 
 app.put('/api/groups/:groupId/assets/:assetId', (req, res) => {
   const { groupId, assetId } = req.params;
-  const { name, quantity, price } = req.body;
+  const { name, quantity, price, tradeExchange } = req.body;
   const data = readAssets();
   const group = data.groups.find(g => g.id === groupId);
   if (!group) return res.status(404).json({ error: '资产组不存在' });
   const idx = group.assets.findIndex(a => a.id === assetId);
   if (idx === -1) return res.status(404).json({ error: '资产不存在' });
   if (name !== undefined) group.assets[idx].name = String(name);
-  if (quantity !== undefined) group.assets[idx].quantity = parseFloat(quantity);
+  if (quantity !== undefined) {
+    group.assets[idx].quantity = parseFloat(quantity);
+    group.assets[idx].unrealizedQuantity = 0;
+  }
   if (price !== undefined) group.assets[idx].price = parseFloat(price);
+  if (tradeExchange !== undefined) {
+    const normalized = normalizeTradeExchange(tradeExchange);
+    if (normalized) {
+      group.assets[idx].tradeExchange = normalized;
+    }
+  }
   group.assets[idx].updatedAt = new Date().toISOString();
   if (writeAssets(data)) {
     res.json({ success: true, asset: group.assets[idx] });
@@ -297,6 +874,8 @@ app.delete('/api/groups/:groupId/assets/:assetId', (req, res) => {
   const initialLen = group.assets.length;
   group.assets = group.assets.filter(a => a.id !== assetId);
   if (group.assets.length === initialLen) return res.status(404).json({ error: '资产不存在' });
+  const strategy = ensureGroupStrategy(group);
+  rebuildStrategyBaseline(group, strategy);
   if (writeAssets(data)) {
     res.json({ success: true });
   } else {
@@ -304,41 +883,96 @@ app.delete('/api/groups/:groupId/assets/:assetId', (req, res) => {
   }
 });
 
-// Bitget USDT本位永续 合约模糊搜索
-// 使用 v1 合约列表接口（v2 参数兼容性问题）: https://api.bitget.com/api/mix/v1/market/contracts?productType=umcbl
-app.get('/api/bitget/search', (req, res) => {
+async function handleContractSearch(req, res, fallbackExchange = 'bitget') {
   const query = (req.query.query || '').toString().trim();
-  if (!query) return res.status(400).json({ error: 'query 必填' });
+  if (!query) {
+    res.status(400).json({ error: 'query 必填' });
+    return;
+  }
 
-  const url = 'https://api.bitget.com/api/mix/v1/market/contracts?productType=umcbl';
-  https.get(url, (resp) => {
-    let data = '';
-    resp.on('data', (chunk) => { data += chunk; });
-    resp.on('end', () => {
-      try {
-        const json = JSON.parse(data || '{}');
-        if (json.code !== '00000') {
-          return res.status(502).json({ error: json.msg || 'Bitget接口错误' });
-        }
-        const list = Array.isArray(json.data) ? json.data : [];
-        const q = query.toUpperCase();
-        const filtered = list.filter(it => {
-          const symbol = (it.symbol || '').toUpperCase();
-          const baseCoin = (it.baseCoin || '').toUpperCase();
-          return symbol.includes(q) || baseCoin.includes(q);
-        }).slice(0, 20).map(it => ({
-          symbol: it.symbol,
-          baseCoin: it.baseCoin,
-          quoteCoin: it.quoteCoin,
-          displayName: `${it.baseCoin}/${it.quoteCoin} 永续 (${it.symbol})`
-        }));
-        res.json({ success: true, results: filtered });
-      } catch (e) {
-        res.status(500).json({ error: '解析Bitget返回失败' });
+  const runtime = getExchangeRuntimeConfig();
+  const defaultExchange = (fallbackExchange || runtime.activeExchange || 'bitget').toLowerCase();
+  const exchangeParam = (req.query.exchange || req.query.provider || '').toString().trim().toLowerCase();
+  const exchange = exchangeParam || defaultExchange;
+  const resolvedExchange = exchange === 'sandbox' ? 'bitget' : exchange;
+
+  try {
+    if (resolvedExchange === 'bitget') {
+      const url = 'https://api.bitget.com/api/v2/mix/market/contracts?productType=USDT-FUTURES';
+      const json = await httpsGetJson(url, 5000);
+      if (json.code !== '00000') {
+        return res.status(502).json({ error: json.msg || 'Bitget接口错误' });
       }
-    });
-  }).on('error', (err) => {
-    res.status(500).json({ error: '请求Bitget失败: ' + err.message });
+      const list = Array.isArray(json.data) ? json.data : [];
+      const q = query.toUpperCase();
+      const filtered = list.filter((it) => {
+        const symbol = String(it.symbol || '').toUpperCase();
+        const baseCoin = String(it.baseCoin || '').toUpperCase();
+        return symbol.includes(q) || baseCoin.includes(q);
+      }).slice(0, 20).map((it) => {
+        const bitgetSymbol = deriveBitgetSymbol(it.symbol);
+        const asterSymbol = deriveAsterSymbol(it.symbol);
+        return {
+          displayName: `${it.baseCoin}/${it.quoteCoin} 永续 (${it.symbol})`,
+          symbol: bitgetSymbol,
+          bitgetSymbol,
+          asterSymbol,
+          baseAsset: it.baseCoin,
+          quoteAsset: it.quoteCoin,
+          source: 'bitget'
+        };
+      });
+      return res.json({ success: true, results: filtered, exchange: 'bitget' });
+    }
+
+    if (resolvedExchange === 'aster') {
+      await ensureAsterExchangeInfo();
+      const q = query.toUpperCase();
+      const matches = (ASTER_SYMBOL_CACHE.symbols || []).filter((info) => {
+        const symbol = String(info.symbol || '').toUpperCase();
+        const base = String(info.baseAsset || '').toUpperCase();
+        const quote = String(info.quoteAsset || '').toUpperCase();
+        return symbol.includes(q) || base.includes(q) || quote.includes(q);
+      }).slice(0, 20).map((info) => {
+        const lot = getAsterLotFilter(info) || {};
+        const asterSymbol = String(info.symbol || '').toUpperCase();
+        const bitgetSymbol = deriveBitgetSymbol(asterSymbol);
+        return {
+          displayName: `${info.baseAsset}/${info.quoteAsset} 永续 (${info.symbol})`,
+          symbol: bitgetSymbol,
+          bitgetSymbol,
+          asterSymbol,
+          baseAsset: info.baseAsset,
+          quoteAsset: info.quoteAsset,
+          stepSize: lot.stepSize,
+          minQty: lot.minQty,
+          pricePrecision: info.pricePrecision,
+          quantityPrecision: info.quantityPrecision,
+          source: 'aster'
+        };
+      });
+      return res.json({ success: true, results: matches, exchange: 'aster' });
+    }
+
+    return res.status(400).json({ error: `不支持的交易所: ${exchange}` });
+  } catch (error) {
+    console.error('搜索交易对失败:', error.message);
+    res.status(500).json({ error: error.message || '搜索失败' });
+  }
+}
+
+app.get('/api/exchange/search', (req, res) => {
+  handleContractSearch(req, res).catch((err) => {
+    console.error('搜索接口异常:', err);
+    res.status(500).json({ error: err.message || '搜索失败' });
+  });
+});
+
+app.get('/api/bitget/search', (req, res) => {
+  req.query.exchange = 'bitget';
+  handleContractSearch(req, res, 'bitget').catch((err) => {
+    console.error('Bitget 搜索异常:', err);
+    res.status(500).json({ error: err.message || '搜索失败' });
   });
 });
 
@@ -370,6 +1004,61 @@ function computeBaselineWeights(group) {
     if (a.symbol) weights[a.symbol] = mv / total;
   }
   return weights;
+}
+
+function normalizeBaselineWeights(weights = {}) {
+  const entries = Object.entries(weights);
+  if (!entries.length) {
+    return { changed: false, weights: {} };
+  }
+  let sum = 0;
+  for (const [, value] of entries) {
+    const num = Number(value) || 0;
+    if (num > 0) sum += num;
+  }
+  if (sum <= 0) {
+    return { changed: true, weights: {} };
+  }
+  const normalized = {};
+  let changed = Math.abs(sum - 1) > 0.0001;
+  for (const [symbol, value] of entries) {
+    const num = Number(value) || 0;
+    if (num <= 0) {
+      changed = true;
+      continue;
+    }
+    const normalizedValue = num / sum;
+    normalized[symbol] = normalizedValue;
+    if (!changed && Math.abs(normalizedValue - num) > 1e-6) {
+      changed = true;
+    }
+  }
+  return { changed, weights: normalized };
+}
+
+function createBaselineSnapshot(group) {
+  const assets = group.assets.map(a => ({
+    symbol: a.symbol,
+    quantity: Number(a.quantity || 0),
+    price: Number(a.price || 0)
+  }));
+  const totalValue = assets.reduce((sum, asset) => sum + (asset.quantity * asset.price), 0);
+  return {
+    timestamp: new Date().toISOString(),
+    totalValue,
+    assets
+  };
+}
+
+function rebuildStrategyBaseline(group, strategy = null) {
+  const s = strategy || ensureGroupStrategy(group);
+  s.baselineWeights = computeBaselineWeights(group);
+  const { weights, changed } = normalizeBaselineWeights(s.baselineWeights);
+  if (changed) {
+    s.baselineWeights = weights;
+  }
+  s.baselineSnapshot = createBaselineSnapshot(group);
+  return s;
 }
 
 // === 策略：API ===
@@ -406,14 +1095,7 @@ app.post('/api/groups/:groupId/strategy/enable', (req, res) => {
   if (!group) return res.status(404).json({ error: '资产组不存在' });
   const s = ensureGroupStrategy(group);
   s.enabled = true;
-  s.baselineWeights = computeBaselineWeights(group);
-  // 记录基线持仓与总值，供“资产变动统计”使用
-  const baselineTotal = group.assets.reduce((sum, a) => sum + (Number(a.price || 0) * Number(a.quantity || 0)), 0);
-  s.baselineSnapshot = {
-    timestamp: new Date().toISOString(),
-    totalValue: baselineTotal,
-    assets: group.assets.map(a => ({ symbol: a.symbol, quantity: Number(a.quantity || 0), price: Number(a.price || 0) }))
-  };
+  rebuildStrategyBaseline(group, s);
   if (!writeAssets(data)) return res.status(500).json({ error: '保存失败' });
   // 启动定时器并异步立即执行一次
   startStrategyTimer(group.id);
@@ -518,13 +1200,19 @@ function isStockSymbol(symbol) {
 
 async function fetchBitgetV1TickerLast(symbol) {
   try {
-    const url = `https://api.bitget.com/api/mix/v1/market/ticker?symbol=${encodeURIComponent(symbol)}`;
+    const normalizedSymbol = deriveBitgetSymbol(symbol);
+    if (!normalizedSymbol) {
+      throw new Error('无效的 Bitget 交易对');
+    }
+    const v2Symbol = normalizedSymbol.replace(/_UMCBL$|_CMCBL$/i, '');
+    const url = `https://api.bitget.com/api/v2/mix/market/ticker?symbol=${encodeURIComponent(v2Symbol)}&productType=USDT-FUTURES`;
     const json = await httpsGetJson(url, 5000); // 5秒超时
-    if (json && json.code === '00000' && json.data && json.data.last) {
-      const price = parseFloat(json.data.last);
+    const tickerData = Array.isArray(json?.data) ? json.data[0] : json?.data;
+    if (json && json.code === '00000' && tickerData && tickerData.lastPr) {
+      const price = parseFloat(tickerData.lastPr);
       if (!isNaN(price) && price > 0) return price;
     }
-    console.warn(`获取${symbol}行情失败:`, json?.msg || '未知错误');
+    console.warn(`获取${normalizedSymbol}行情失败:`, json?.msg || '未知错误');
     return null; // 返回null而不是抛出异常
   } catch (error) {
     console.error(`获取${symbol}行情异常:`, error.message);
@@ -542,18 +1230,21 @@ app.post('/api/groups/:groupId/refresh-prices', async (req, res) => {
 
     let updatedCount = 0;
     for (const asset of group.assets) {
-      if (!asset.symbol) continue;
+      const bitgetSymbol = getBitgetSymbolForAsset(asset);
+      if (!bitgetSymbol) continue;
       try {
-        const last = await fetchBitgetV1TickerLast(asset.symbol);
+        const last = await fetchBitgetV1TickerLast(bitgetSymbol);
         if (last !== null) {
           asset.price = last;
+          asset.symbol = bitgetSymbol;
+          asset.exchangeSymbols = normalizeExchangeSymbolsPayload(asset.exchangeSymbols, bitgetSymbol);
           asset.updatedAt = new Date().toISOString();
           updatedCount += 1;
         } else {
-          console.warn(`跳过更新${asset.symbol}价格（获取失败）`);
+          console.warn(`跳过更新${bitgetSymbol}价格（获取失败）`);
         }
       } catch (e) {
-        console.error(`更新${asset.symbol}价格时发生异常:`, e.message);
+        console.error(`更新${bitgetSymbol}价格时发生异常:`, e.message);
         // 忽略单个失败，继续
       }
       // 轻微延迟，降低风控触发
@@ -588,12 +1279,27 @@ async function runRebalanceOnce(groupId) {
   if (!group) return { skipped: true };
   const s = ensureGroupStrategy(group);
   if (!s.enabled) return { skipped: true };
-  // 刷新价格
+
+  const assetSymbols = new Set(group.assets.map(a => a.symbol).filter(Boolean));
+  const initialBaseline = s.baselineWeights || {};
+  const baselineSymbols = new Set(Object.keys(initialBaseline));
+  const weightSum = Object.values(initialBaseline).reduce((sum, val) => {
+    const num = Number(val);
+    return Number.isFinite(num) ? sum + num : sum;
+  }, 0);
+  const hasMissingWeights = assetSymbols.size > 0 && [...assetSymbols].some(sym => !baselineSymbols.has(sym));
+  const hasObsoleteWeights = baselineSymbols.size > 0 && [...baselineSymbols].some(sym => !assetSymbols.has(sym));
+  let needsRebaseline = hasMissingWeights || hasObsoleteWeights || (assetSymbols.size > 0 && weightSum <= 0);
+  let stateChanged = false;
+
   for (const a of group.assets) {
     if (!a.symbol) continue;
-    try { 
+    try {
       const price = await fetchBitgetV1TickerLast(a.symbol);
       if (price !== null) {
+        if (Number(a.price || 0) !== price) {
+          stateChanged = true;
+        }
         a.price = price;
       }
     } catch (error) {
@@ -601,133 +1307,300 @@ async function runRebalanceOnce(groupId) {
     }
     await new Promise(r => setTimeout(r, 120));
   }
-  // 总市值
+
+  if (needsRebaseline) {
+    rebuildStrategyBaseline(group, s);
+    stateChanged = true;
+  } else {
+    const normalization = normalizeBaselineWeights(s.baselineWeights || {});
+    if (normalization.changed) {
+      s.baselineWeights = normalization.weights;
+      stateChanged = true;
+    }
+    if (s.baselineSnapshot) {
+      const snapshotAssets = Array.isArray(s.baselineSnapshot.assets) ? s.baselineSnapshot.assets : [];
+      const filteredAssets = snapshotAssets.filter(asset => !asset.symbol || assetSymbols.has(asset.symbol));
+      if (filteredAssets.length !== snapshotAssets.length) {
+        s.baselineSnapshot.assets = filteredAssets;
+        s.baselineSnapshot.totalValue = filteredAssets.reduce((sum, asset) => sum + (Number(asset.quantity || 0) * Number(asset.price || 0)), 0);
+        if (!s.baselineSnapshot.timestamp) {
+          s.baselineSnapshot.timestamp = new Date().toISOString();
+        }
+        stateChanged = true;
+      }
+    }
+  }
+
   const total = group.assets.reduce((sum, a) => sum + (Number(a.price || 0) * Number(a.quantity || 0)), 0) || 0;
-  if (total <= 0) return { skipped: true };
+  if (total <= 0) {
+    if (stateChanged) writeAssets(data);
+    return { skipped: true };
+  }
+
+  const baselineWeights = s.baselineWeights || {};
+  const activeBaselineSymbols = Object.keys(baselineWeights).filter(symbol => assetSymbols.has(symbol));
+  if (!activeBaselineSymbols.length) {
+    if (stateChanged) writeAssets(data);
+    return { skipped: true };
+  }
+
   const minTrade = Number(s.minTradeUSDT || 100);
   const maxTrade = Number(s.maxTradeUSDT || 1000);
 
-  // 偏离计算（基于当前价格与基准权重）
   const deviations = [];
+  const deviationMap = new Map();
   for (const a of group.assets) {
+    if (!a.symbol) continue;
     const curVal = Number(a.price || 0) * Number(a.quantity || 0);
     const curWeight = total > 0 ? (curVal / total) : 0;
-    const targetWeight = s.baselineWeights[a.symbol] || 0;
+    const targetWeight = baselineWeights[a.symbol] || 0;
     const targetVal = total * targetWeight;
-    const diff = targetVal - curVal; // 正为应买入金额
-    const devPercent = (curWeight - targetWeight) * 100; // 正为超配
-    deviations.push({
+    const diff = targetVal - curVal;
+    const devPercent = (curWeight - targetWeight) * 100;
+    const entry = {
       symbol: a.symbol,
       currentValue: curVal,
       targetValue: targetVal,
       deviationAmount: diff,
       deviationPercent: devPercent
-    });
+    };
+    deviations.push(entry);
+    deviationMap.set(a.symbol, entry);
   }
 
-  // 生成动作（按最小交易额过滤）
   const actions = [];
   function roundQtyForSymbol(symbol, qty) {
     const absQty = Math.abs(Number(qty) || 0);
     if (!(absQty > 0)) return 0;
     const upper = String(symbol || '').toUpperCase();
-    const decimals = upper.startsWith('BTC') ? 5 : 3; // BTC 除外，使用更高精度
+    const decimals = upper.startsWith('BTC') ? 5 : 3;
     const factor = Math.pow(10, decimals);
-    return Math.floor(absQty * factor) / factor; // 向下取整，避免超出金额上限
-  }
-  
-  // 检查股票市场是否开放
-  const marketOpen = isStockMarketOpen();
-  
-  for (const a of group.assets) {
-    const d = deviations.find(x => x.symbol === a.symbol);
-    if (!d) continue;
-    const price = Number(a.price || 0);
-    
-    // 如果是股票交易对且市场未开放，跳过交易 - 已禁用，让交易所来决定是否接受交易
-    // if (isStockSymbol(a.symbol) && !marketOpen) {
-    //   console.log(`⏰ 跳过股票交易（市场未开放）: ${a.symbol} ${d.deviationAmount > 0 ? 'BUY' : 'SELL'} ${Math.abs(d.deviationAmount).toFixed(2)} USDT`);
-    //   continue;
-    // }
-    
-    if (Math.abs(d.deviationAmount) >= minTrade && price > 0) {
-      const cappedValue = Math.min(Math.abs(d.deviationAmount), maxTrade);
-      const rawQty = cappedValue / price;
-      const roundedQty = roundQtyForSymbol(a.symbol, rawQty);
-      console.log(`💰 ${a.symbol}: 偏差=${d.deviationAmount.toFixed(2)}, 价格=${price}, 原始数量=${rawQty.toFixed(6)}, 舍入数量=${roundedQty}`);
-      if (roundedQty > 0) {
-        actions.push({ symbol: a.symbol, side: d.deviationAmount > 0 ? 'BUY' : 'SELL', valueUSDT: cappedValue, quantity: roundedQty });
-        console.log(`✅ 添加交易操作: ${a.symbol} ${d.deviationAmount > 0 ? 'BUY' : 'SELL'} ${roundedQty} (${cappedValue.toFixed(2)} USDT)`);
-      }
-    }
+    return Math.floor(absQty * factor) / factor;
   }
 
-  // 检查是否为真实交易模式
-  const bitgetCfg = readBitgetCfg();
-  const isRealTrading = !bitgetCfg.sandbox && bitgetCfg.apiKey && bitgetCfg.secretKey && bitgetCfg.passphrase;
-  
-  if (isRealTrading) {
-    // 真实交易模式：执行实际订单
-    for (const act of actions) {
-      try {
-        const coinParam = act.symbol.replace('_UMCBL', '');
+  const nowIso = new Date().toISOString();
+
+  for (const a of group.assets) {
+    if (!a.symbol) continue;
+    const symbols = getAssetExchangeSymbols(a);
+    const d = deviationMap.get(a.symbol);
+    if (!d) continue;
+    const price = Number(a.price || 0);
+    if (!(price > 0)) continue;
+
+    const roundingSymbol = symbols.aster || symbols.bitget || a.symbol;
+    const logSymbol = symbols.bitget || a.symbol;
+    const prevUnrealized = Number(a.unrealizedQuantity || 0);
+    if (d) {
+      d.price = price;
+      d.previousUnrealizedQuantity = prevUnrealized;
+      d.deviationQuantity = 0;
+      d.pendingUnrealizedQuantity = prevUnrealized;
+      d.pendingTradeValue = prevUnrealized * price;
+      d.postTradeUnrealizedQuantity = prevUnrealized;
+    }
+    let desiredQtyChange = 0;
+
+    const absDeviation = Math.abs(d.deviationAmount);
+    if (absDeviation > 0) {
+      const cappedValue = Math.min(absDeviation, maxTrade);
+      const rawQty = cappedValue / price;
+      const roundedQty = roundQtyForSymbol(roundingSymbol, rawQty);
+      if (roundedQty > 0) {
+        const direction = d.deviationAmount > 0 ? 1 : -1;
+        desiredQtyChange = direction * roundedQty;
+        a.quantity = Number(a.quantity || 0) + desiredQtyChange;
+        a.updatedAt = nowIso;
+      }
+    }
+    if (d) {
+      d.deviationQuantity = desiredQtyChange;
+    }
+
+    let pendingQty = prevUnrealized + desiredQtyChange;
+    const pendingTradeValue = pendingQty * price;
+    const pendingValueAbs = Math.abs(pendingTradeValue);
+    if (d) {
+      d.pendingUnrealizedQuantity = pendingQty;
+      d.pendingTradeValue = pendingTradeValue;
+    }
+
+    if (pendingValueAbs < minTrade) {
+      a.unrealizedQuantity = pendingQty;
+      if (d) {
+        d.postTradeUnrealizedQuantity = pendingQty;
+      }
+      continue;
+    }
+
+    const tradeDirection = pendingQty >= 0 ? 1 : -1;
+    const cappedPendingValue = Math.min(pendingValueAbs, maxTrade);
+    const plannedQtyAbs = roundQtyForSymbol(roundingSymbol, cappedPendingValue / price);
+    if (!(plannedQtyAbs > 0)) {
+      a.unrealizedQuantity = pendingQty;
+      if (d) {
+        d.postTradeUnrealizedQuantity = pendingQty;
+      }
+      continue;
+    }
+
+    const plannedQty = plannedQtyAbs * tradeDirection;
+    const remainingQty = pendingQty - plannedQty;
+    a.unrealizedQuantity = remainingQty;
+    if (d) {
+      d.plannedTradeQuantity = plannedQty;
+      d.postTradeUnrealizedQuantity = remainingQty;
+      d.executedTradeValue = plannedQtyAbs * price * tradeDirection;
+    }
+
+    const plannedValue = plannedQtyAbs * price;
+    console.log(`💰 ${logSymbol}: 偏差=${d.deviationAmount.toFixed(2)}, 价格=${price}, 未实现累积数量=${pendingQty.toFixed(6)}, 计划执行数量=${plannedQty.toFixed(6)}`);
+
+    actions.push({
+      symbol: logSymbol,
+      tradeSymbols: symbols,
+      side: tradeDirection > 0 ? 'BUY' : 'SELL',
+      valueUSDT: plannedValue,
+      quantity: plannedQtyAbs,
+      plannedSignedQuantity: plannedQty,
+      assetId: a.id
+    });
+    console.log(`✅ 添加交易操作: ${logSymbol} ${tradeDirection > 0 ? 'BUY' : 'SELL'} ${plannedQtyAbs} (${plannedValue.toFixed(2)} USDT)`);
+  }
+
+  const exchangeRuntime = getExchangeRuntimeConfig();
+  const bitgetCfg = exchangeRuntime.bitget;
+  const asterCfg = exchangeRuntime.aster;
+  const canBitget = hasBitgetCredentials(bitgetCfg);
+  const canAster = hasAsterCredentials(asterCfg);
+
+  for (const act of actions) {
+    const asset = group.assets.find(item => item.id === act.assetId) || group.assets.find(item => item.symbol === act.symbol);
+    const targetExchange = getAssetTradeExchange(asset, exchangeRuntime) || 'bitget';
+    act.exchange = targetExchange;
+
+    const hasCredentials = targetExchange === 'bitget' ? canBitget : targetExchange === 'aster' ? canAster : false;
+
+    if (!hasCredentials) {
+      if (asset) {
+        asset.unrealizedQuantity = Number(asset.unrealizedQuantity || 0) + Number(act.plannedSignedQuantity || 0);
+        asset.updatedAt = nowIso;
+      }
+      act.realTradeStatus = 'simulated';
+      act.realTradeError = targetExchange === 'bitget' ? 'Bitget 未配置 API' : targetExchange === 'aster' ? 'Aster 未配置 API' : '未配置有效交易所';
+      continue;
+    }
+
+    try {
+      if (targetExchange === 'bitget') {
+        const coinParam = (act.tradeSymbols?.bitget || act.symbol).replace('_UMCBL', '');
         const result = await runPythonMarketOrder({
           coin: coinParam,
           side: act.side.toLowerCase(),
           size: act.quantity,
-          marginMode: 'isolated', // 默认使用逐仓模式
+          marginMode: 'isolated',
           cfg: bitgetCfg
         });
-        
+
         if (result.success) {
-          // 成功交易后更新资产数量
-          const asset = group.assets.find(a => a.symbol === act.symbol);
           if (asset) {
-            const signedQty = act.side === 'BUY' ? act.quantity : -act.quantity;
-            asset.quantity = Number(asset.quantity) + signedQty;
+            const plannedSignedQty = Number(act.plannedSignedQuantity || 0);
+            const executedSignedQty = act.side === 'BUY' ? act.quantity : -act.quantity;
+            const residual = plannedSignedQty - executedSignedQty;
+            asset.unrealizedQuantity = Number(asset.unrealizedQuantity || 0) + residual;
+            asset.tradeExchange = 'bitget';
+            asset.updatedAt = nowIso;
           }
           act.realTradeStatus = 'success';
           act.realTradeOutput = result.out;
         } else {
-          // 交易失败：不更新持仓数量，只记录失败状态
+          if (asset) {
+            asset.unrealizedQuantity = Number(asset.unrealizedQuantity || 0) + Number(act.plannedSignedQuantity || 0);
+            asset.updatedAt = nowIso;
+          }
           act.realTradeStatus = 'failed';
           act.realTradeError = result.err || result.out;
-          console.log(`❌ 交易失败，跳过持仓更新: ${act.symbol} ${act.side} ${act.quantity}`);
+          console.log(`❌ Bitget 交易失败，跳过持仓更新: ${act.symbol} ${act.side} ${act.quantity}`);
         }
-      } catch (error) {
-        // 交易错误：不更新持仓数量，只记录错误状态
+      } else if (targetExchange === 'aster') {
+        const tradeSymbol = act.tradeSymbols?.aster || deriveAsterSymbol(act.symbol);
+        const execution = await placeAsterMarketOrder({
+          symbol: tradeSymbol,
+          side: act.side,
+          quantity: act.quantity,
+          config: asterCfg
+        });
+        const executedQty = Number(execution.quantity || 0);
+        if (asset) {
+          const plannedSignedQty = Number(act.plannedSignedQuantity || 0);
+          const executedSignedQty = act.side === 'BUY' ? executedQty : -executedQty;
+          const residual = plannedSignedQty - executedSignedQty;
+          asset.unrealizedQuantity = Number(asset.unrealizedQuantity || 0) + residual;
+          asset.tradeExchange = 'aster';
+          asset.updatedAt = nowIso;
+        }
+        act.executedQuantity = executedQty;
+        act.realTradeStatus = 'success';
+        act.realTradeOutput = execution.result;
+      } else {
+        if (asset) {
+          asset.unrealizedQuantity = Number(asset.unrealizedQuantity || 0) + Number(act.plannedSignedQuantity || 0);
+          asset.updatedAt = nowIso;
+        }
         act.realTradeStatus = 'error';
-        act.realTradeError = error.message;
-        console.log(`❌ 交易错误，跳过持仓更新: ${act.symbol} ${act.side} ${act.quantity} - ${error.message}`);
+        act.realTradeError = `未支持的交易所类型: ${targetExchange}`;
       }
-    }
-  } else {
-    // 模拟交易模式：只更新本地数量
-    for (const act of actions) {
-      const asset = group.assets.find(a => a.symbol === act.symbol);
-      if (!asset) continue;
-      const signedQty = act.side === 'BUY' ? act.quantity : -act.quantity;
-      asset.quantity = Number(asset.quantity) + signedQty;
+    } catch (error) {
+      if (asset) {
+        asset.unrealizedQuantity = Number(asset.unrealizedQuantity || 0) + Number(act.plannedSignedQuantity || 0);
+        asset.updatedAt = nowIso;
+      }
+      act.realTradeStatus = 'error';
+      act.realTradeError = error.message;
+      console.log(`❌ 交易错误，跳过持仓更新: ${act.symbol} ${act.side} ${act.quantity} - ${error.message}`);
     }
   }
 
   // 保存与记录
   const ts = new Date().toISOString();
+  const tradingModes = actions.map(act => act.realTradeStatus === 'simulated' ? 'simulated' : 'real');
+  let tradingMode = 'mixed';
+  if (tradingModes.every(mode => mode === 'simulated')) {
+    tradingMode = 'simulated';
+  } else if (tradingModes.every(mode => mode === 'real')) {
+    tradingMode = 'real';
+  }
+
   s.lastResult = {
     timestamp: ts,
     totalBefore: total,
     actions,
     deviations,
-    tradingMode: isRealTrading ? 'real' : 'simulated'
+    tradingMode
   };
   writeAssets(data);
   for (const act of actions) {
-    const status = isRealTrading ? (act.realTradeStatus || 'real') : 'simulated';
-    const note = isRealTrading ? 
-      (act.realTradeStatus === 'success' ? '策略调仓（真实交易成功）' : 
-       act.realTradeStatus === 'failed' ? '策略调仓（真实交易失败）' : 
-       '策略调仓（真实交易错误）') : 
-      '策略调仓（模拟）';
+    let status;
+    let note;
+    switch (act.realTradeStatus) {
+      case 'success':
+        status = 'real';
+        note = '策略调仓（真实交易成功）';
+        break;
+      case 'failed':
+        status = 'error';
+        note = '策略调仓（真实交易失败）';
+        break;
+      case 'error':
+        status = 'error';
+        note = '策略调仓（真实交易错误）';
+        break;
+      case 'simulated':
+      default:
+        status = 'simulated';
+        note = '策略调仓（模拟）';
+        break;
+    }
     
     appendTradingLog({ 
       timestamp: ts, 
@@ -768,14 +1641,7 @@ app.post('/api/groups/:groupId/strategy/enable', (req, res) => {
   if (!group) return res.status(404).json({ error: '资产组不存在' });
   const s = ensureGroupStrategy(group);
   s.enabled = true;
-  s.baselineWeights = computeBaselineWeights(group);
-  // 记录基线持仓与总值
-  const baselineTotal = group.assets.reduce((sum, a) => sum + (Number(a.price || 0) * Number(a.quantity || 0)), 0);
-  s.baselineSnapshot = {
-    timestamp: new Date().toISOString(),
-    totalValue: baselineTotal,
-    assets: group.assets.map(a => ({ symbol: a.symbol, quantity: Number(a.quantity || 0), price: Number(a.price || 0) }))
-  };
+  rebuildStrategyBaseline(group, s);
   if (!writeAssets(data)) return res.status(500).json({ error: '保存失败' });
   startStrategyTimer(group.id);
   // 立即执行一次（异步，不阻塞响应）
@@ -846,6 +1712,7 @@ app.post('/api/groups/:groupId/reset-stock-positions', (req, res) => {
         if (baselineAsset) {
           const oldQuantity = asset.quantity;
           asset.quantity = baselineAsset.quantity;
+          asset.unrealizedQuantity = 0;
           asset.updatedAt = new Date().toISOString();
           resetCount++;
           console.log(`🔄 重置 ${asset.symbol} 持仓: ${oldQuantity} -> ${baselineAsset.quantity}`);
@@ -1348,25 +2215,11 @@ app.post('/api/trading/logs/clear', (req, res) => {
 });
 
 // === 手动交易（真实下单）===
-function readBitgetCfg() {
-  try {
-    if (fs.existsSync(BITGET_CFG_FILE)) {
-      const raw = fs.readFileSync(BITGET_CFG_FILE, 'utf8');
-      return JSON.parse(raw || '{}');
-    }
-  } catch (e) {}
-  return { apiKey: '', secretKey: '', passphrase: '', sandbox: false };
-}
-
 async function getUsdtPriceForCoinOrSymbol(coinOrSymbol) {
   // 统一转为 *USDT_UMCBL 以取期货最新价
-  let symbol = coinOrSymbol.toUpperCase();
-  if (!symbol.endsWith('USDT') && !symbol.endsWith('_UMCBL')) {
-    symbol = symbol + 'USDT_UMCBL';
-  }
-  if (symbol.endsWith('USDT')) symbol = symbol + '_UMCBL';
-  const p = await fetchBitgetV1TickerLast(symbol);
-  return { symbol, price: p };
+  const symbol = deriveBitgetSymbol(coinOrSymbol);
+  const price = await fetchBitgetV1TickerLast(symbol);
+  return { symbol, price };
 }
 
 function runPythonMarketOrder({ coin, side, size, marginMode, cfg }) {
@@ -1415,77 +2268,209 @@ function runPythonSetupAccount({ symbol, side, cfg }) {
 
 app.post('/api/trade/manual', async (req, res) => {
   try {
-    const { symbolOrCoin, side, usdt, marginMode } = req.body || {};
+    const { symbolOrCoin, side, usdt, marginMode, exchange } = req.body || {};
     if (!symbolOrCoin || !side || !usdt) {
       return res.status(400).json({ success: false, error: 'symbolOrCoin, side, usdt 必填' });
     }
     const usdtAmt = Number(usdt);
     if (!(usdtAmt > 0)) return res.status(400).json({ success: false, error: '无效的金额' });
 
-    const cfg = readBitgetCfg();
-    if (!cfg.apiKey || !cfg.secretKey || !cfg.passphrase) {
-      return res.status(400).json({ success: false, error: 'Bitget配置未完成' });
+    const orderSide = String(side || '').toUpperCase();
+    if (!['BUY', 'SELL'].includes(orderSide)) {
+      return res.status(400).json({ success: false, error: 'side 仅支持 BUY / SELL' });
     }
 
-    // 计算下单数量
-    const { price } = await getUsdtPriceForCoinOrSymbol(symbolOrCoin);
-    const size = +(usdtAmt / price).toFixed(6);
-    const coinParam = symbolOrCoin.toUpperCase().endsWith('USDT') ? symbolOrCoin.toUpperCase() : (symbolOrCoin.toUpperCase() + 'USDT');
+    const runtime = getExchangeRuntimeConfig();
+    const normalizedRequestExchange = normalizeTradeExchange(exchange);
+    const assetsData = readAssets();
+    const allAssets = (assetsData.groups || []).flatMap(g => g.assets || []);
+    const symbolUpper = String(symbolOrCoin || '').toUpperCase();
+    const matchedAsset = allAssets.find((asset) => {
+      const symbols = getAssetExchangeSymbols(asset);
+      const candidates = [asset.symbol, symbols.bitget, symbols.aster, deriveAsterSymbol(asset.symbol), deriveBitgetSymbol(symbolUpper)];
+      return candidates.filter(Boolean).some(sym => String(sym).toUpperCase() === symbolUpper);
+    });
 
-    // 仅使用请求指定的模式，默认全仓
-    const orderSide = side.toLowerCase();
-    const tradeSymbol = coinParam; // e.g. SOLUSDT
-    // 先同步账户：单向 + 逐仓 + 杠杆3倍
-    await runPythonSetupAccount({ symbol: tradeSymbol, side: orderSide, cfg });
-    // 仅用逐仓
-    const result = await runPythonMarketOrder({ coin: coinParam, side: orderSide, size, marginMode: 'isolated', cfg });
-    const ok = !!result.success;
-    if (ok) {
+    let targetExchange = normalizedRequestExchange;
+    if (!targetExchange && matchedAsset) {
+      targetExchange = getAssetTradeExchange(matchedAsset, runtime);
+    }
+    if (!targetExchange) {
+      if (hasBitgetCredentials(runtime.bitget)) {
+        targetExchange = 'bitget';
+      } else if (hasAsterCredentials(runtime.aster)) {
+        targetExchange = 'aster';
+      } else {
+        return res.status(400).json({ success: false, error: '未配置可用交易所 API' });
+      }
+    }
+
+    const priceInfo = await getUsdtPriceForCoinOrSymbol(symbolOrCoin);
+    const price = Number(priceInfo.price || 0);
+    if (!(price > 0)) {
+      return res.status(400).json({ success: false, error: '无法获取价格，稍后重试' });
+    }
+
+    const rawQuantity = usdtAmt / price;
+    if (!(rawQuantity > 0)) {
+      return res.status(400).json({ success: false, error: '下单数量过小' });
+    }
+
+    if (targetExchange === 'bitget') {
+      const cfg = runtime.bitget;
+      if (!cfg.apiKey || !cfg.secretKey || !cfg.passphrase) {
+        return res.status(400).json({ success: false, error: 'Bitget配置未完成' });
+      }
+      const size = +(rawQuantity.toFixed(6));
+      if (!(size > 0)) {
+        return res.status(400).json({ success: false, error: '下单数量过小' });
+      }
+      const coinParam = symbolOrCoin.toUpperCase().endsWith('USDT')
+        ? symbolOrCoin.toUpperCase()
+        : (symbolOrCoin.toUpperCase() + 'USDT');
+      const tradeSymbol = coinParam;
+      await runPythonSetupAccount({ symbol: tradeSymbol, side: orderSide.toLowerCase(), cfg });
+      const result = await runPythonMarketOrder({
+        coin: coinParam,
+        side: orderSide.toLowerCase(),
+        size,
+        marginMode: marginMode || 'isolated',
+        cfg
+      });
+      const ok = !!result.success;
+      if (ok) {
+        const ts = new Date().toISOString();
+        appendTradingLog({
+          timestamp: ts,
+          groupId: 'manual',
+          symbol: deriveBitgetSymbol(tradeSymbol),
+          side: orderSide,
+          valueUSDT: usdtAmt,
+          quantity: size,
+          exchange: 'bitget',
+          status: 'real',
+          note: '手动交易（Bitget）'
+        });
+      }
+      return res.json({ success: ok, exchange: 'bitget', output: result.out, errorOutput: result.err });
+    }
+
+    if (targetExchange === 'aster') {
+      const cfg = runtime.aster;
+      if (!cfg.apiKey || !cfg.secretKey) {
+        return res.status(400).json({ success: false, error: 'Aster配置未完成' });
+      }
+      const tradeSymbol = deriveAsterSymbol(symbolOrCoin);
+      await ensureAsterExchangeInfo();
+      const normalized = normalizeAsterOrderQuantity(tradeSymbol, rawQuantity);
+      if (!(normalized.qty > 0)) {
+        return res.status(400).json({ success: false, error: '下单数量过小' });
+      }
+      if (normalized.minQty && normalized.qty < normalized.minQty) {
+        return res.status(400).json({ success: false, error: `最小下单数量为 ${normalized.minQty}` });
+      }
+      const execution = await placeAsterMarketOrder({
+        symbol: tradeSymbol,
+        side: orderSide,
+        quantity: normalized.qty,
+        config: cfg
+      });
+      const executedQty = execution.quantity;
       const ts = new Date().toISOString();
-      appendTradingLog({ timestamp: ts, groupId: 'manual', symbol: `${tradeSymbol}_UMCBL`, side: orderSide.toUpperCase(), valueUSDT: usdtAmt, quantity: size, status: 'real', note: '策略调仓（真实）' });
+      appendTradingLog({
+        timestamp: ts,
+        groupId: 'manual',
+        symbol: tradeSymbol,
+        side: orderSide,
+        valueUSDT: usdtAmt,
+        quantity: executedQty,
+        exchange: 'aster',
+        status: 'real',
+        note: '手动交易（Aster）'
+      });
+      return res.json({
+        success: true,
+        exchange: 'aster',
+        executedQuantity: executedQty,
+        output: execution.result
+      });
     }
-    return res.json({ success: ok, output: result.out, errorOutput: result.err });
+
+    if (targetExchange === 'sandbox') {
+      return res.status(400).json({ success: false, error: '当前为 Sandbox 模式，不执行真实下单' });
+    }
+
+    return res.status(400).json({ success: false, error: `暂不支持的交易所: ${targetExchange}` });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message || '下单失败' });
   }
 });
 
+app.get('/api/exchange/config', (req, res) => {
+  const cfg = getExchangeRuntimeConfig();
+  const response = {
+    activeExchange: cfg.activeExchange || 'sandbox',
+    bitget: {
+      apiKeyMasked: maskSensitive(cfg.bitget.apiKey || ''),
+      hasSecret: !!cfg.bitget.secretKey,
+      passphraseMasked: cfg.bitget.passphrase ? '•'.repeat(Math.min(8, cfg.bitget.passphrase.length)) : '',
+      sandbox: !!cfg.bitget.sandbox
+    },
+    aster: {
+      apiKeyMasked: maskSensitive(cfg.aster.apiKey || ''),
+      hasSecret: !!cfg.aster.secretKey,
+      recvWindow: cfg.aster.recvWindow,
+      defaultLeverage: cfg.aster.defaultLeverage
+    }
+  };
+  res.json({ success: true, config: response });
+});
+
+app.put('/api/exchange/config', (req, res) => {
+  const { activeExchange, bitget, aster } = req.body || {};
+  const current = readExchangeConfig();
+  const next = { ...current };
+
+  if (activeExchange && typeof activeExchange === 'string') {
+    const normalized = activeExchange.toLowerCase();
+    if (['bitget', 'aster', 'sandbox'].includes(normalized)) {
+      next.activeExchange = normalized;
+    }
+  }
+
+  if (bitget && typeof bitget === 'object') {
+    next.bitget = normalizeBitgetConfig({ ...next.bitget, ...bitget });
+  }
+
+  if (aster && typeof aster === 'object') {
+    next.aster = normalizeAsterConfig({ ...next.aster, ...aster });
+  }
+
+  if (!writeExchangeConfig(next)) {
+    return res.status(500).json({ success: false, error: '保存失败' });
+  }
+  res.json({ success: true });
+});
+
 app.get('/api/bitget/config', (req, res) => {
   const cfg = readBitgetCfg();
-  function maskMid(value, left = 3, right = 3) {
-    if (!value) return '';
-    const s = String(value);
-    if (s.length <= left + right) return '***';
-    return s.slice(0, left) + '*'.repeat(Math.max(3, s.length - left - right)) + s.slice(-right);
-  }
   const response = {
-    apiKeyMasked: maskMid(cfg.apiKey || ''),
+    apiKeyMasked: maskSensitive(cfg.apiKey || ''),
     passphraseMasked: cfg.passphrase ? '•'.repeat(Math.min(8, cfg.passphrase.length)) : '',
     hasSecret: !!cfg.secretKey,
     sandbox: !!cfg.sandbox
   };
-  // 不回传明文敏感信息
   res.json({ success: true, config: response });
 });
 
 app.put('/api/bitget/config', (req, res) => {
   const { apiKey, secretKey, passphrase, sandbox } = req.body || {};
-  const current = readBitgetCfg();
-  // 解析 sandbox 为布尔值
-  let parsedSandbox;
-  if (typeof sandbox === 'string') {
-    const s = sandbox.toLowerCase();
-    parsedSandbox = (s === 'true' || s === '1' || s === 'on' || s === 'yes');
-  } else {
-    parsedSandbox = !!sandbox;
-  }
-  const next = {
-    apiKey: apiKey !== undefined ? String(apiKey) : current.apiKey,
-    secretKey: secretKey !== undefined ? String(secretKey) : current.secretKey,
-    passphrase: passphrase !== undefined ? String(passphrase) : current.passphrase,
-    sandbox: sandbox !== undefined ? parsedSandbox : !!current.sandbox
-  };
-  if (!writeBitgetCfg(next)) return res.status(500).json({ success: false, error: '保存失败' });
+  const patch = {};
+  if (apiKey !== undefined) patch.apiKey = apiKey;
+  if (secretKey !== undefined) patch.secretKey = secretKey;
+  if (passphrase !== undefined) patch.passphrase = passphrase;
+  if (sandbox !== undefined) patch.sandbox = sandbox;
+  if (!writeBitgetCfg(patch)) return res.status(500).json({ success: false, error: '保存失败' });
   res.json({ success: true });
 });
 // 股票价格查询API - 解决CORS问题

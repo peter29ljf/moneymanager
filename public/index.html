@@ -216,22 +216,56 @@ h1{font-size:24px;margin:0}
   <!-- Bitget 设置 -->
   <div id="bitget-tab" class="section">
     <div class="card">
-      <h3 style="margin:0 0 12px">Bitget 设置</h3>
-      <div class="grid-2">
-        <div><label class="label">API Key</label><input id="bitget-api-key" class="select" placeholder="***"></div>
-        <div><label class="label">Secret Key</label><input id="bitget-secret-key" class="select" type="password" placeholder="********"></div>
+      <h3 style="margin:0 0 12px">交易所设置</h3>
+      <div class="form-group">
+        <label class="label">选择交易所</label>
+        <select id="exchange-active" class="select">
+          <option value="sandbox">Sandbox 模式（仅模拟）</option>
+          <option value="bitget">Bitget</option>
+          <option value="aster">Aster</option>
+        </select>
       </div>
-      <div class="grid-2" style="margin-top:16px">
-        <div><label class="label">Passphrase</label><input id="bitget-passphrase" class="select" type="password" placeholder="********"></div>
-        <div style="display:flex;align-items:center;gap:8px;margin-top:22px">
-          <input id="bitget-sandbox" type="checkbox"> <span class="muted">Sandbox(测试环境)</span>
+
+      <div id="bitget-fields">
+        <h4 style="margin:12px 0">Bitget API</h4>
+        <div class="grid-2">
+          <div><label class="label">API Key</label><input id="bitget-api-key" class="select" placeholder="***"></div>
+          <div><label class="label">Secret Key</label><input id="bitget-secret-key" class="select" type="password" placeholder="********"></div>
+        </div>
+        <div class="grid-2" style="margin-top:16px">
+          <div><label class="label">Passphrase</label><input id="bitget-passphrase" class="select" type="password" placeholder="********"></div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:22px">
+            <input id="bitget-sandbox" type="checkbox"> <span class="muted">Sandbox(测试环境)</span>
+          </div>
         </div>
       </div>
-      <div style="margin-top:16px"><button id="bitget-save" class="btn btn-primary">保存配置</button></div>
-      <div id="bitget-config-status" class="muted" style="margin-top:8px">未加载(敏感信息已隐藏)</div>
+
+      <div id="aster-fields" style="margin-top:16px;display:none">
+        <h4 style="margin:0 0 12px">Aster API</h4>
+        <div class="grid-2">
+          <div><label class="label">API Key</label><input id="aster-api-key" class="select" placeholder="***"></div>
+          <div><label class="label">Secret Key</label><input id="aster-secret-key" class="select" type="password" placeholder="********"></div>
+        </div>
+        <div class="grid-2" style="margin-top:16px">
+          <div><label class="label">Recv Window (ms)</label><input id="aster-recv-window" class="select" type="number" min="100" step="100" value="5000"></div>
+          <div><label class="label">默认杠杆</label><input id="aster-default-leverage" class="select" type="number" min="1" max="125" value="3"></div>
+        </div>
+        <div style="margin-top:8px" class="muted">Aster 默认使用单向持仓 + 全仓模式。</div>
+      </div>
+
+      <div style="margin-top:16px"><button id="exchange-save" class="btn btn-primary">保存配置</button></div>
+      <div id="exchange-config-status" class="muted" style="margin-top:8px">未加载(敏感信息已隐藏)</div>
       <div class="card" style="margin-top:16px;background:#fafafa">
-        <h4 style="margin:0 0 8px">当前配置（已局部隐藏）</h4>
-        <div id="bitget-config-summary" class="kv"></div>
+        <h4 style="margin:0 0 8px">当前交易模式</h4>
+        <div id="exchange-summary-active" class="kv"></div>
+      </div>
+      <div class="card" style="margin-top:16px;background:#fafafa">
+        <h4 style="margin:0 0 8px">Bitget 当前配置</h4>
+        <div id="exchange-summary-bitget" class="kv"></div>
+      </div>
+      <div class="card" style="margin-top:16px;background:#fafafa">
+        <h4 style="margin:0 0 8px">Aster 当前配置</h4>
+        <div id="exchange-summary-aster" class="kv"></div>
       </div>
     </div>
   </div>

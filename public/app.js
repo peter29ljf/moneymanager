@@ -7,6 +7,8 @@ class AssetManager {
         this.ws = null;
         this.wsSymbols = new Set();
         this.priceCache = {}; // symbol -> price
+        this.activeExchange = 'sandbox';
+        this.assetSearchExchange = 'bitget';
         this.init();
     }
 
@@ -17,6 +19,7 @@ class AssetManager {
         this.loadTradingLog();
         this.loadFeeConfig();
         this.loadStrategyComparison();
+        await this.loadExchangeConfig();
         this.startPriceRefreshLoop();
     }
 
@@ -31,7 +34,8 @@ class AssetManager {
         const strategyDisable = document.getElementById('strategy-disable');
         const strategyRefreshNow = document.getElementById('strategy-refresh-now');
         const refreshLogsBtn = document.getElementById('refresh-logs');
-        const bitgetSave = document.getElementById('bitget-save');
+        const exchangeSave = document.getElementById('exchange-save');
+        const exchangeSelector = document.getElementById('exchange-active');
         const deleteGroupBtn = document.getElementById('btn-delete-group');
         const clearLogsBtn = document.getElementById('clear-logs');
         
@@ -75,7 +79,12 @@ class AssetManager {
         if (strategyDisable) strategyDisable.addEventListener('click', () => this.disableStrategy());
         if (strategyRefreshNow) strategyRefreshNow.addEventListener('click', () => this.runStrategyOnce());
         if (refreshLogsBtn) refreshLogsBtn.addEventListener('click', () => this.loadTradingLog());
-        if (bitgetSave) bitgetSave.addEventListener('click', () => this.saveBitgetConfig());
+        if (exchangeSave) exchangeSave.addEventListener('click', () => this.saveExchangeConfig());
+        if (exchangeSelector) exchangeSelector.addEventListener('change', (e) => {
+            const value = e.target.value;
+            this.activeExchange = value;
+            this.toggleExchangeFields(value);
+        });
         if (deleteGroupBtn) deleteGroupBtn.addEventListener('click', () => this.deleteCurrentGroup());
         if (clearLogsBtn) clearLogsBtn.addEventListener('click', () => this.clearTradingLogs());
         
@@ -116,12 +125,12 @@ class AssetManager {
         }
     }
 
-    async addAssetToGroup({ groupId, name, symbol, quantity, price }) {
+    async addAssetToGroup({ groupId, name, symbol, quantity, price, exchangeSymbols, tradeExchange }) {
         try {
             const response = await fetch(`/api/groups/${groupId}/assets`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, symbol, quantity, price })
+                body: JSON.stringify({ name, symbol, quantity, price, exchangeSymbols, tradeExchange })
             });
             const json = await response.json();
             if (!response.ok || !json.success) throw new Error(json.error || '添加失败');
@@ -130,6 +139,22 @@ class AssetManager {
         } catch (error) {
             alert('添加失败: ' + error.message);
         }
+    }
+
+    formatBitgetSymbol(symbol) {
+        if (!symbol) return '';
+        const upper = String(symbol).trim().toUpperCase();
+        if (upper.endsWith('_UMCBL') || upper.endsWith('_CMCBL')) return upper;
+        if (upper.endsWith('USDT')) return `${upper}_UMCBL`;
+        if (upper.includes('_')) return upper;
+        return `${upper}USDT_UMCBL`;
+    }
+
+    formatAsterSymbol(symbol) {
+        if (!symbol) return '';
+        const upper = String(symbol).trim().toUpperCase();
+        if (upper.endsWith('_UMCBL') || upper.endsWith('_CMCBL')) return upper.slice(0, -7);
+        return upper.replace(/[^A-Z0-9]/g, '');
     }
 
     async deleteCurrentGroup() {
@@ -187,6 +212,14 @@ class AssetManager {
             price: parseFloat(newPrice) || currentAsset.price,
             quantity: parseFloat(newQuantity) || currentAsset.quantity
         };
+
+        const currentExchange = currentAsset.tradeExchange || (currentAsset.exchangeSymbols?.aster ? 'aster' : 'bitget');
+        const exchangeInput = prompt('交易所 (bitget/aster)', currentExchange);
+        if (exchangeInput === null) return;
+        const exchangeNormalized = exchangeInput.trim().toLowerCase();
+        if (exchangeNormalized === 'bitget' || exchangeNormalized === 'aster') {
+            updatedAsset.tradeExchange = exchangeNormalized;
+        }
 
         try {
             const response = await fetch(`/api/groups/${groupId}/assets/${id}`, {
@@ -454,10 +487,21 @@ class AssetManager {
             listElement.innerHTML = group.assets.map(asset => {
                 const totalValue = Number(asset.price || 0) * Number(asset.quantity || 0);
                 const percent = total > 0 ? (totalValue / total * 100) : 0;
+                const exchangeSymbols = asset.exchangeSymbols || {};
+                const bitgetSymbol = asset.symbol || exchangeSymbols.bitget || '-';
+                const asterSymbol = exchangeSymbols.aster || null;
+                const tradeExchange = asset.tradeExchange ? asset.tradeExchange.toUpperCase() : 'BITGET';
+                const exchangeLines = [`<span style="display:block;color:#666;font-size:12px;">Bitget: ${bitgetSymbol}</span>`];
+                if (asterSymbol) {
+                    exchangeLines.push(`<span style="display:block;color:#666;font-size:12px;">Aster: ${asterSymbol}</span>`);
+                }
+                exchangeLines.push(`<span style="display:block;color:#0ea5e9;font-size:12px;">使用交易所: ${tradeExchange}</span>`);
                 return `
                 <div class="asset-item">
                     <div class="asset-info">
-                        <div class="asset-name">${asset.name} <span style="font-weight:normal;color:#999">(${asset.symbol || '-'})</span></div>
+                        <div class="asset-name">${asset.name}
+                            <div style="margin-top:6px">${exchangeLines.join('')}</div>
+                        </div>
                         <div class="asset-details">
                             价格: $${Number(asset.price || 0).toFixed(4)} | 
                             数量: ${asset.quantity} | 
@@ -473,11 +517,14 @@ class AssetManager {
                 </div>`;
             }).join('');
 
-            // 组占比摘要
             summaryElement.innerHTML = group.assets.map(asset => {
                 const totalValue = Number(asset.price || 0) * Number(asset.quantity || 0);
                 const percent = total > 0 ? (totalValue / total * 100) : 0;
-                return `<div>${asset.name} (${asset.symbol || '-'}) - $${totalValue.toFixed(2)} (${percent.toFixed(2)}%)`;
+                const exchangeSymbols = asset.exchangeSymbols || {};
+                const bitgetSymbol = asset.symbol || exchangeSymbols.bitget || '-';
+                const asterSymbol = exchangeSymbols.aster ? ` / Aster: ${exchangeSymbols.aster}` : '';
+                const exchangeLabel = asset.tradeExchange ? ` / 交易所: ${asset.tradeExchange.toUpperCase()}` : '';
+                return `<div>${asset.name} (Bitget: ${bitgetSymbol}${asterSymbol}${exchangeLabel}) - $${totalValue.toFixed(2)} (${percent.toFixed(2)}%)`;
             }).join('');
         }
         this.updateSummaryForCurrentGroup();
@@ -584,25 +631,44 @@ class AssetManager {
             nextBtn.style.display = 'inline-block';
             if (step === 0) {
                 nextBtn.textContent = '搜索';
+                const defaultExchange = this.assetSearchExchange || (this.activeExchange === 'sandbox' ? 'bitget' : this.activeExchange);
+                this.wizard.data = { assetName: '', chosenContract: null, quantity: 0, searchResults: [], searchExchange: defaultExchange };
                 body.innerHTML = `
                     <div class="form-group">
                         <label>资产名称</label>
                         <input id="wizard-asset-name" type="text" placeholder="例如：BTC 或 比特币" />
                     </div>
                     <div class="form-group">
-                        <label>选择交易对（USDT 永续）</label>
+                        <label>选择交易所</label>
+                        <select id="wizard-search-exchange" class="select">
+                            <option value="bitget">Bitget</option>
+                            <option value="aster">Aster</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>选择交易对（当前：${this.describeExchange(defaultExchange)}）</label>
                         <div class="input-inline">
                             <input id="wizard-search-query" type="text" placeholder="输入关键字模糊搜索，例如：BTC" />
                             <button id="wizard-search-btn" class="btn">搜索</button>
                         </div>
                         <div id="wizard-search-results" class="search-results"></div>
                     </div>`;
-                document.getElementById('wizard-search-btn').onclick = () => this.searchBitgetContracts();
+                const exchangeSelect = document.getElementById('wizard-search-exchange');
+                if (exchangeSelect) {
+                    exchangeSelect.value = defaultExchange;
+                    exchangeSelect.addEventListener('change', (e) => {
+                        this.wizard.data.searchExchange = e.target.value;
+                        this.assetSearchExchange = e.target.value;
+                    });
+                }
+                document.getElementById('wizard-search-btn').onclick = () => this.searchContracts();
             } else if (step === 1) {
                 nextBtn.textContent = '确认';
                 const chosen = this.wizard.data.chosenContract;
                 body.innerHTML = `
                     <div>已选择：<strong>${chosen ? chosen.displayName : '-'}</strong></div>
+                    <div style="color:#666;margin-top:4px;">Bitget: ${chosen?.bitgetSymbol || '-'}</div>
+                    <div style="color:#666;">Aster: ${chosen?.asterSymbol || '-'}</div>
                     <div class="form-group" style="margin-top:10px;">
                         <label>持有数量</label>
                         <input id="wizard-quantity" type="number" step="0.000001" placeholder="0" />
@@ -613,6 +679,8 @@ class AssetManager {
                 body.innerHTML = `
                     <div>资产名称：${assetName}</div>
                     <div>交易对：${chosenContract ? chosenContract.displayName : '-'}</div>
+                    <div>Bitget: ${chosenContract?.bitgetSymbol || '-'}</div>
+                    <div>Aster: ${chosenContract?.asterSymbol || '-'}</div>
                     <div>数量：${quantity}</div>
                     <div class="form-group" style="margin-top:10px;">
                         <label><input id="wizard-continue" type="checkbox" /> 继续添加下一个资产</label>
@@ -649,11 +717,21 @@ class AssetManager {
                 if (isNaN(q) || q <= 0) { alert('请输入有效数量'); return false; }
                 this.wizard.data.quantity = q;
                 // 创建资产
+                const chosen = this.wizard.data.chosenContract || {};
+                const bitgetSymbol = chosen.bitgetSymbol || chosen.symbol || this.formatBitgetSymbol(chosen.asterSymbol);
+                const asterSymbol = chosen.asterSymbol || this.formatAsterSymbol(chosen.bitgetSymbol || chosen.symbol);
+                const selectedExchange = (this.wizard.data.searchExchange || this.assetSearchExchange || 'bitget').toLowerCase();
+                const normalizedExchange = selectedExchange === 'aster' ? 'aster' : 'bitget';
                 await this.addAssetToGroup({
                     groupId: this.currentGroupId,
                     name: this.wizard.data.assetName,
-                    symbol: this.wizard.data.chosenContract.symbol,
-                    quantity: q
+                    symbol: bitgetSymbol,
+                    quantity: q,
+                    exchangeSymbols: {
+                        bitget: bitgetSymbol,
+                        aster: asterSymbol
+                    },
+                    tradeExchange: normalizedExchange
                 });
                 return true;
             }
@@ -686,17 +764,23 @@ class AssetManager {
         this.updateGroupDisplay();
     }
 
-    async searchBitgetContracts() {
+    async searchContracts() {
         const query = (document.getElementById('wizard-search-query').value || '').trim();
         if (!query) { alert('请输入搜索关键字'); return; }
+        const exchangeSelect = document.getElementById('wizard-search-exchange');
+        const exchange = exchangeSelect ? exchangeSelect.value : (this.wizard?.data?.searchExchange || this.assetSearchExchange || this.activeExchange || 'bitget');
+        this.assetSearchExchange = exchange;
+        if (this.wizard?.data) this.wizard.data.searchExchange = exchange;
         const resultsEl = document.getElementById('wizard-search-results');
-        resultsEl.innerHTML = '<div class="loading">搜索中...</div>';
-        try {
-            const resp = await fetch(`/api/bitget/search?query=${encodeURIComponent(query)}`);
-            const json = await resp.json();
-            if (!resp.ok || !json.success) throw new Error(json.error || '搜索失败');
-            const list = json.results || [];
-            if (list.length === 0) {
+        if (resultsEl) resultsEl.innerHTML = '<div class="loading">搜索中...</div>';
+        if (this.wizard && this.wizard.data) {
+            this.wizard.data.searchResults = [];
+            this.wizard.data.chosenContract = null;
+        }
+
+        const renderResults = (list) => {
+            if (!resultsEl) return;
+            if (!list.length) {
                 resultsEl.innerHTML = '<div class="loading">未找到结果，请重试</div>';
                 return;
             }
@@ -706,37 +790,69 @@ class AssetManager {
                 </div>
             `).join('');
             this.wizard.data.searchResults = list;
+            this.wizard.data.chosenContract = null;
+        };
+
+        try {
+            const resp = await fetch(`/api/exchange/search?query=${encodeURIComponent(query)}&exchange=${encodeURIComponent(exchange)}`);
+            const json = await resp.json();
+            if (!resp.ok || !json.success) throw new Error(json.error || '搜索失败');
+            const list = (json.results || []).map(item => {
+                const normalizedSource = item.source === 'aster' ? 'aster' : 'bitget';
+                return {
+                    ...item,
+                    bitgetSymbol: item.bitgetSymbol || this.formatBitgetSymbol(item.symbol),
+                    asterSymbol: item.asterSymbol || this.formatAsterSymbol(item.symbol),
+                    source: normalizedSource
+                };
+            });
+            renderResults(list);
         } catch (err) {
-            // 后端不可用时，直接调用 Bitget 公共 REST 作为兜底
+            console.warn('后端搜索失败，尝试直接调用交易所API', err);
             try {
-                const resp2 = await fetch('https://api.bitget.com/api/v2/mix/market/contracts?productType=umcbl');
-                const json2 = await resp2.json();
-                if (json2.code !== '00000') throw new Error(json2.msg || 'Bitget接口错误');
-                const all = Array.isArray(json2.data) ? json2.data : [];
-                const q = query.toUpperCase();
-                const filtered = all.filter(it => {
-                    const symbol = String(it.symbol || '').toUpperCase();
-                    const baseCoin = String(it.baseCoin || '').toUpperCase();
-                    return symbol.includes(q) || baseCoin.includes(q);
-                }).slice(0, 20).map(it => ({
-                    symbol: it.symbol,
-                    baseCoin: it.baseCoin,
-                    quoteCoin: it.quoteCoin,
-                    displayName: `${it.baseCoin}/${it.quoteCoin} 永续 (${it.symbol})`
-                }));
-                if (filtered.length === 0) {
-                    resultsEl.innerHTML = '<div class="loading">未找到结果，请更换关键字</div>';
-                    return;
+                if (exchange === 'aster') {
+                    const resp2 = await fetch('https://fapi.asterdex.com/fapi/v1/exchangeInfo');
+                    const json2 = await resp2.json();
+                    const all = Array.isArray(json2.symbols) ? json2.symbols : [];
+                    const q = query.toUpperCase();
+                    const filtered = all.filter(it => {
+                        const symbol = String(it.symbol || '').toUpperCase();
+                        const base = String(it.baseAsset || '').toUpperCase();
+                        return symbol.includes(q) || base.includes(q);
+                    }).slice(0, 20).map(it => ({
+                        displayName: `${it.baseAsset}/${it.quoteAsset} 永续 (${it.symbol})`,
+                        symbol: this.formatBitgetSymbol(it.symbol),
+                        bitgetSymbol: this.formatBitgetSymbol(it.symbol),
+                        asterSymbol: this.formatAsterSymbol(it.symbol),
+                        baseAsset: it.baseAsset,
+                        quoteAsset: it.quoteAsset,
+                        source: 'aster'
+                    }));
+                    renderResults(filtered);
+                } else {
+                    const resp2 = await fetch('https://api.bitget.com/api/v2/mix/market/contracts?productType=USDT-FUTURES');
+                    const json2 = await resp2.json();
+                    if (json2.code !== '00000') throw new Error(json2.msg || 'Bitget接口错误');
+                    const all = Array.isArray(json2.data) ? json2.data : [];
+                    const q = query.toUpperCase();
+                    const filtered = all.filter(it => {
+                        const symbol = String(it.symbol || '').toUpperCase();
+                        const base = String(it.baseCoin || '').toUpperCase();
+                        return symbol.includes(q) || base.includes(q);
+                    }).slice(0, 20).map(it => ({
+                        displayName: `${it.baseCoin}/${it.quoteCoin} 永续 (${it.symbol})`,
+                        symbol: this.formatBitgetSymbol(it.symbol),
+                        bitgetSymbol: this.formatBitgetSymbol(it.symbol),
+                        asterSymbol: this.formatAsterSymbol(it.symbol),
+                        baseAsset: it.baseCoin,
+                        quoteAsset: it.quoteCoin,
+                        source: 'bitget'
+                    }));
+                    renderResults(filtered);
                 }
-                resultsEl.innerHTML = filtered.map((r, idx) => `
-                    <div class="search-item" onclick="assetManager.chooseContract(${idx})">
-                        ${r.displayName}
-                    </div>
-                `).join('');
-                this.wizard.data.searchResults = filtered;
-            } catch (e2) {
-                resultsEl.innerHTML = '';
-                alert(`搜索失败：${err.message || ''}${e2.message ? ' / ' + e2.message : ''}`);
+            } catch (fallbackErr) {
+                if (resultsEl) resultsEl.innerHTML = '';
+                alert(`搜索失败：${err.message || ''}${fallbackErr?.message ? ' / ' + fallbackErr.message : ''}`);
             }
         }
     }
@@ -746,7 +862,8 @@ class AssetManager {
         const chosen = list[index];
         if (!chosen) return;
         this.wizard.data.chosenContract = chosen;
-        alert(`已选择：${chosen.displayName}`);
+        const sourceLabel = this.describeExchange(chosen.source || this.activeExchange || 'bitget');
+        alert(`已选择：${chosen.displayName}\n来源：${sourceLabel}`);
     }
 
     // WS 订阅管理（可扩展为直连交易所WS；当前以定时REST为主）
@@ -837,62 +954,131 @@ class AssetManager {
         }
     }
 
-    // Bitget 配置
-    async loadBitgetConfig() {
-        const status = document.getElementById('bitget-config-status');
+    // 交易所配置
+    toggleExchangeFields(active) {
+        const asterFields = document.getElementById('aster-fields');
+        if (asterFields) {
+            asterFields.style.display = active === 'aster' ? 'block' : 'none';
+        }
+    }
+
+    describeExchange(value) {
+        const map = {
+            sandbox: 'Sandbox 模式（仅模拟）',
+            bitget: 'Bitget 永续',
+            aster: 'Aster 永续'
+        };
+        return map[value] || map[this.activeExchange] || 'Bitget 永续';
+    }
+
+    async loadExchangeConfig() {
+        const status = document.getElementById('exchange-config-status');
         try {
-            const resp = await fetch('/api/bitget/config');
+            const resp = await fetch('/api/exchange/config');
             const json = await resp.json();
             if (!resp.ok || !json.success) throw new Error(json.error || '加载失败');
             const cfg = json.config || {};
-            // 输入框不显示明文，仅占位
-            document.getElementById('bitget-api-key').placeholder = cfg.apiKeyMasked || '';
-            document.getElementById('bitget-api-key').value = '';
-            document.getElementById('bitget-secret-key').placeholder = cfg.hasSecret ? '********' : '';
-            document.getElementById('bitget-secret-key').value = '';
-            document.getElementById('bitget-passphrase').placeholder = cfg.passphraseMasked || '';
-            document.getElementById('bitget-passphrase').value = '';
-            document.getElementById('bitget-sandbox').checked = !!cfg.sandbox;
-            status.textContent = '已加载(敏感信息已隐藏)';
-            // 概览
-            const box = document.getElementById('bitget-config-summary');
-            if (box) {
-                box.innerHTML = `
-                    <div>API Key: ${cfg.apiKeyMasked || ''}</div>
-                    <div>Secret Key: ${cfg.hasSecret ? '********' : '(未设置)'}</div>
-                    <div>Passphrase: ${cfg.passphraseMasked || ''}</div>
-                    <div>Sandbox: ${cfg.sandbox ? '开启' : '关闭'}</div>
+            const active = cfg.activeExchange || 'bitget';
+            this.activeExchange = active;
+            this.assetSearchExchange = active === 'sandbox' ? 'bitget' : active;
+            const selector = document.getElementById('exchange-active');
+            if (selector) {
+                selector.value = active;
+                this.toggleExchangeFields(active);
+            }
+            if (status) status.textContent = `当前模式：${this.describeExchange(active)}（敏感信息已隐藏）`;
+            const activeSummary = document.getElementById('exchange-summary-active');
+            if (activeSummary) {
+                activeSummary.innerHTML = `<div>当前交易模式：${this.describeExchange(active)}</div>`;
+            }
+
+            // Bitget
+            const bitgetCfg = cfg.bitget || {};
+            const bitgetApi = document.getElementById('bitget-api-key');
+            const bitgetSecret = document.getElementById('bitget-secret-key');
+            const bitgetPass = document.getElementById('bitget-passphrase');
+            if (bitgetApi) { bitgetApi.placeholder = bitgetCfg.apiKeyMasked || ''; bitgetApi.value = ''; }
+            if (bitgetSecret) { bitgetSecret.placeholder = bitgetCfg.hasSecret ? '********' : ''; bitgetSecret.value = ''; }
+            if (bitgetPass) { bitgetPass.placeholder = bitgetCfg.passphraseMasked || ''; bitgetPass.value = ''; }
+            const sandboxBox = document.getElementById('bitget-sandbox');
+            if (sandboxBox) sandboxBox.checked = !!bitgetCfg.sandbox;
+            const bitgetSummary = document.getElementById('exchange-summary-bitget');
+            if (bitgetSummary) {
+                bitgetSummary.innerHTML = `
+                    <div>API Key: ${bitgetCfg.apiKeyMasked || ''}</div>
+                    <div>Secret Key: ${bitgetCfg.hasSecret ? '********' : '(未设置)'}</div>
+                    <div>Passphrase: ${bitgetCfg.passphraseMasked || ''}</div>
+                    <div>Sandbox: ${bitgetCfg.sandbox ? '开启' : '关闭'}</div>
                 `;
             }
+
+            // Aster
+            const asterCfg = cfg.aster || {};
+            const asterApi = document.getElementById('aster-api-key');
+            const asterSecret = document.getElementById('aster-secret-key');
+            const asterRecv = document.getElementById('aster-recv-window');
+            const asterLev = document.getElementById('aster-default-leverage');
+            if (asterApi) { asterApi.placeholder = asterCfg.apiKeyMasked || ''; asterApi.value = ''; }
+            if (asterSecret) { asterSecret.placeholder = asterCfg.hasSecret ? '********' : ''; asterSecret.value = ''; }
+            if (asterRecv) asterRecv.value = asterCfg.recvWindow || 5000;
+            if (asterLev) asterLev.value = asterCfg.defaultLeverage || 3;
+            const asterSummary = document.getElementById('exchange-summary-aster');
+            if (asterSummary) {
+                asterSummary.innerHTML = `
+                    <div>API Key: ${asterCfg.apiKeyMasked || ''}</div>
+                    <div>Secret Key: ${asterCfg.hasSecret ? '********' : '(未设置)'}</div>
+                    <div>Recv Window: ${asterCfg.recvWindow || 5000} ms</div>
+                    <div>默认杠杆: ${asterCfg.defaultLeverage || 3}</div>
+                `;
+            }
+
         } catch (e) {
             if (status) status.textContent = '加载失败';
         }
     }
 
-    async saveBitgetConfig() {
-        const status = document.getElementById('bitget-config-status');
-        const apiKey = document.getElementById('bitget-api-key').value;
-        const secretKey = document.getElementById('bitget-secret-key').value;
-        const passphrase = document.getElementById('bitget-passphrase').value;
-        const sandbox = document.getElementById('bitget-sandbox').checked;
+    async saveExchangeConfig() {
+        const status = document.getElementById('exchange-config-status');
+        const activeSelect = document.getElementById('exchange-active');
+        const activeExchange = activeSelect ? activeSelect.value : 'sandbox';
+
+        const payload = { activeExchange };
+
+        const bitgetPayload = {};
+        const apiKeyVal = document.getElementById('bitget-api-key')?.value.trim();
+        const secretVal = document.getElementById('bitget-secret-key')?.value.trim();
+        const passVal = document.getElementById('bitget-passphrase')?.value.trim();
+        const sandboxChecked = document.getElementById('bitget-sandbox')?.checked;
+        if (apiKeyVal) bitgetPayload.apiKey = apiKeyVal;
+        if (secretVal) bitgetPayload.secretKey = secretVal;
+        if (passVal) bitgetPayload.passphrase = passVal;
+        if (sandboxChecked !== undefined) bitgetPayload.sandbox = sandboxChecked;
+        if (Object.keys(bitgetPayload).length > 0) payload.bitget = bitgetPayload;
+
+        const asterPayload = {};
+        const asterApiVal = document.getElementById('aster-api-key')?.value.trim();
+        const asterSecretVal = document.getElementById('aster-secret-key')?.value.trim();
+        const recvWindowVal = document.getElementById('aster-recv-window')?.value.trim();
+        const leverageVal = document.getElementById('aster-default-leverage')?.value.trim();
+        if (asterApiVal) asterPayload.apiKey = asterApiVal;
+        if (asterSecretVal) asterPayload.secretKey = asterSecretVal;
+        if (recvWindowVal) asterPayload.recvWindow = recvWindowVal;
+        if (leverageVal) asterPayload.defaultLeverage = leverageVal;
+        if (Object.keys(asterPayload).length > 0) payload.aster = asterPayload;
+
         try {
-            const params = new URLSearchParams();
-            params.set('apiKey', apiKey || '');
-            params.set('secretKey', secretKey || '');
-            params.set('passphrase', passphrase || '');
-            params.set('sandbox', sandbox ? 'true' : 'false');
-            const resp = await fetch('/api/bitget/config', {
-                method: 'PUT', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: params.toString()
+            const resp = await fetch('/api/exchange/config', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
             });
             const json = await resp.json();
             if (!resp.ok || !json.success) throw new Error(json.error || '保存失败');
-            status.textContent = '已保存';
-            // 保存后重新加载掩码显示
-            await this.loadBitgetConfig();
-            this.showUpdateStatus('Bitget配置已保存', 'success');
+            await this.loadExchangeConfig();
+            if (status) status.textContent = '已保存（敏感信息已隐藏）';
+            this.showUpdateStatus('交易所配置已保存', 'success');
         } catch (e) {
-            status.textContent = '保存失败';
+            if (status) status.textContent = '保存失败';
             this.showUpdateStatus('保存失败: ' + (e.message || ''), 'error');
         }
     }
@@ -908,33 +1094,62 @@ class AssetManager {
             if (!resp.ok || !json.success || !json.lastResult) { box.innerHTML = '<div class="loading">暂无刷新结果</div>'; return; }
             const { timestamp, deviations, actions } = json.lastResult;
             const timeStr = new Date(timestamp).toLocaleString('zh-CN');
-            const devRows = (deviations || []).map(d => `
+            const assetMap = new Map((group.assets || []).map(a => [a.symbol, a]));
+            const formatQty = (value) => {
+                const num = Number(value);
+                return Number.isFinite(num) ? num.toFixed(6) : '0.000000';
+            };
+            const formatValue = (value) => {
+                const num = Number(value);
+                return Number.isFinite(num) ? num.toFixed(2) : '0.00';
+            };
+            const devRows = (deviations || []).map(d => {
+                const asset = assetMap.get(d.symbol);
+                const prev = Number(d.previousUnrealizedQuantity);
+                const prevUnrealized = Number.isFinite(prev) ? prev : Number(asset?.unrealizedQuantity || 0);
+                const deviationQtyNum = Number(d.deviationQuantity);
+                const deviationQty = Number.isFinite(deviationQtyNum) ? deviationQtyNum : 0;
+                const pendingQtyNum = Number(d.pendingUnrealizedQuantity);
+                const pendingQty = Number.isFinite(pendingQtyNum) ? pendingQtyNum : (prevUnrealized + deviationQty);
+                const tradeValueNum = Number(d.pendingTradeValue);
+                const priceSource = Number(d.price);
+                const fallbackPrice = Number(asset?.price || 0);
+                const pendingTradeValue = Number.isFinite(tradeValueNum) ? tradeValueNum : pendingQty * (Number.isFinite(priceSource) ? priceSource : fallbackPrice);
+                return `
                 <tr>
                     <td>${d.symbol}</td>
-                    <td>${d.deviationPercent.toFixed(2)}%</td>
-                    <td>${d.deviationAmount.toFixed(2)} USDT</td>
-                </tr>`).join('');
-            const actRows = (actions || []).map(a => `
+                    <td>${formatQty(prevUnrealized)}</td>
+                    <td>${formatQty(deviationQty)}</td>
+                    <td>${formatQty(pendingQty)}</td>
+                    <td>${formatValue(pendingTradeValue)} USDT</td>
+                </tr>`;
+            }).join('');
+            const actRows = (actions || []).map(a => {
+                const asset = assetMap.get(a.symbol);
+                const unrealized = asset ? Number(asset.unrealizedQuantity || 0) : 0;
+                return `
                 <tr>
                     <td>${a.symbol}</td>
                     <td>${a.side}</td>
                     <td>${a.quantity.toFixed(6)}</td>
                     <td>${a.valueUSDT.toFixed(2)} USDT</td>
-                </tr>`).join('');
+                    <td>${unrealized.toFixed(6)}</td>
+                </tr>`;
+            }).join('');
             box.innerHTML = `
                 <div>最近刷新时间：${timeStr}</div>
                 <div style="margin-top:8px;">
                     <strong>偏离情况</strong>
                     <table style="width:100%;border-collapse:collapse;margin-top:4px;">
-                        <thead><tr><th>交易对</th><th>偏离百分比</th><th>偏离金额</th></tr></thead>
-                        <tbody>${devRows || '<tr><td colspan="3">无</td></tr>'}</tbody>
+                        <thead><tr><th>交易对</th><th>上期未实现数量</th><th>本期偏离数量</th><th>本期未实现数量</th><th>本期应交易金额</th></tr></thead>
+                        <tbody>${devRows || '<tr><td colspan="5">无</td></tr>'}</tbody>
                     </table>
                 </div>
                 <div style="margin-top:8px;">
                     <strong>本次交易</strong>
                     <table style="width:100%;border-collapse:collapse;margin-top:4px;">
-                        <thead><tr><th>交易对</th><th>方向</th><th>数量</th><th>金额</th></tr></thead>
-                        <tbody>${actRows || '<tr><td colspan="4">本次未达最小交易额，无调整</td></tr>'}</tbody>
+                        <thead><tr><th>交易对</th><th>方向</th><th>数量</th><th>金额</th><th>刷新后未实现数量</th></tr></thead>
+                        <tbody>${actRows || '<tr><td colspan="5">本次未达最小交易额，无调整</td></tr>'}</tbody>
                     </table>
                 </div>
                 <div style="margin-top:6px;color:#666;">已完成一次刷新</div>
@@ -1157,7 +1372,7 @@ function switchTab(tabName, btn) {
         }
     }
     if (tabName === 'bitget') {
-        assetManager.loadBitgetConfig();
+        assetManager.loadExchangeConfig();
     }
     if (tabName === 'trading-log') {
         assetManager.loadPortfolioStats();

@@ -1,0 +1,797 @@
+{
+  "fetchedAt": "2025-10-24T14:45:39Z",
+  "stockSymbols": [
+    {
+      "symbol": "AAPLUSDT",
+      "pair": "AAPLUSDT",
+      "contractType": "PERPETUAL",
+      "deliveryDate": 4133404800000,
+      "onboardDate": 1751871600000,
+      "status": "TRADING",
+      "maintMarginPercent": "2.5000",
+      "requiredMarginPercent": "5.0000",
+      "baseAsset": "AAPL",
+      "quoteAsset": "USDT",
+      "marginAsset": "USDT",
+      "pricePrecision": 6,
+      "quantityPrecision": 2,
+      "baseAssetPrecision": 8,
+      "quotePrecision": 8,
+      "underlyingType": "COIN",
+      "underlyingSubType": [
+        "STOCK"
+      ],
+      "symbolType": 1,
+      "tradingMode": 0,
+      "name": "Apple Inc.",
+      "channel": "nasdaq",
+      "sequenceNo": 0,
+      "settlePlan": 0,
+      "triggerProtect": "0.0200",
+      "liquidationFee": "0.025000",
+      "marketTakeBound": "0.02",
+      "createTime": 1752152822909,
+      "filters": [
+        {
+          "minPrice": "0.010000",
+          "maxPrice": "2000",
+          "filterType": "PRICE_FILTER",
+          "tickSize": "0.010000"
+        },
+        {
+          "stepSize": "0.01",
+          "filterType": "LOT_SIZE",
+          "maxQty": "100000",
+          "minQty": "0.01"
+        },
+        {
+          "stepSize": "0.01",
+          "filterType": "MARKET_LOT_SIZE",
+          "maxQty": "10",
+          "minQty": "0.01"
+        },
+        {
+          "limit": 200,
+          "filterType": "MAX_NUM_ORDERS"
+        },
+        {
+          "limit": 10,
+          "filterType": "MAX_NUM_ALGO_ORDERS"
+        },
+        {
+          "notional": "5",
+          "filterType": "MIN_NOTIONAL"
+        },
+        {
+          "multiplierDown": "0.9800",
+          "multiplierUp": "1.0200",
+          "ltMultiplierDown": "0.9800",
+          "multiplierDecimal": "4",
+          "filterType": "PERCENT_PRICE",
+          "ltMultiplierUp": "1.0200"
+        }
+      ],
+      "orderTypes": [
+        "LIMIT",
+        "MARKET",
+        "STOP",
+        "STOP_MARKET",
+        "TAKE_PROFIT",
+        "TAKE_PROFIT_MARKET",
+        "TRAILING_STOP_MARKET"
+      ],
+      "timeInForce": [
+        "GTC",
+        "IOC",
+        "FOK",
+        "GTX",
+        "RPI",
+        "HIDDEN"
+      ]
+    },
+    {
+      "symbol": "TSLAUSDT",
+      "pair": "TSLAUSDT",
+      "contractType": "PERPETUAL",
+      "deliveryDate": 4133404800000,
+      "onboardDate": 1752562800000,
+      "status": "TRADING",
+      "maintMarginPercent": "2.5000",
+      "requiredMarginPercent": "5.0000",
+      "baseAsset": "TSLA",
+      "quoteAsset": "USDT",
+      "marginAsset": "USDT",
+      "pricePrecision": 6,
+      "quantityPrecision": 2,
+      "baseAssetPrecision": 8,
+      "quotePrecision": 8,
+      "underlyingType": "COIN",
+      "underlyingSubType": [
+        "STOCK"
+      ],
+      "symbolType": 1,
+      "tradingMode": 0,
+      "name": "Tesla Inc.",
+      "channel": "nasdaq",
+      "sequenceNo": 0,
+      "settlePlan": 0,
+      "triggerProtect": "0.0200",
+      "liquidationFee": "0.025000",
+      "marketTakeBound": "0.02",
+      "createTime": 1752580795904,
+      "filters": [
+        {
+          "minPrice": "0.010000",
+          "maxPrice": "2000",
+          "filterType": "PRICE_FILTER",
+          "tickSize": "0.010000"
+        },
+        {
+          "stepSize": "0.01",
+          "filterType": "LOT_SIZE",
+          "maxQty": "100000",
+          "minQty": "0.01"
+        },
+        {
+          "stepSize": "0.01",
+          "filterType": "MARKET_LOT_SIZE",
+          "maxQty": "5",
+          "minQty": "0.01"
+        },
+        {
+          "limit": 200,
+          "filterType": "MAX_NUM_ORDERS"
+        },
+        {
+          "limit": 10,
+          "filterType": "MAX_NUM_ALGO_ORDERS"
+        },
+        {
+          "notional": "5",
+          "filterType": "MIN_NOTIONAL"
+        },
+        {
+          "multiplierDown": "0.9800",
+          "multiplierUp": "1.0200",
+          "ltMultiplierDown": "0.9800",
+          "multiplierDecimal": "4",
+          "filterType": "PERCENT_PRICE",
+          "ltMultiplierUp": "1.0200"
+        }
+      ],
+      "orderTypes": [
+        "LIMIT",
+        "MARKET",
+        "STOP",
+        "STOP_MARKET",
+        "TAKE_PROFIT",
+        "TAKE_PROFIT_MARKET",
+        "TRAILING_STOP_MARKET"
+      ],
+      "timeInForce": [
+        "GTC",
+        "IOC",
+        "FOK",
+        "GTX",
+        "RPI",
+        "HIDDEN"
+      ]
+    },
+    {
+      "symbol": "NVDAUSDT",
+      "pair": "NVDAUSDT",
+      "contractType": "PERPETUAL",
+      "deliveryDate": 4133404800000,
+      "onboardDate": 1752562800000,
+      "status": "TRADING",
+      "maintMarginPercent": "2.5000",
+      "requiredMarginPercent": "5.0000",
+      "baseAsset": "NVDA",
+      "quoteAsset": "USDT",
+      "marginAsset": "USDT",
+      "pricePrecision": 6,
+      "quantityPrecision": 2,
+      "baseAssetPrecision": 8,
+      "quotePrecision": 8,
+      "underlyingType": "COIN",
+      "underlyingSubType": [
+        "STOCK"
+      ],
+      "symbolType": 1,
+      "tradingMode": 0,
+      "name": "NVIDIA Corporation",
+      "channel": "nasdaq",
+      "sequenceNo": 0,
+      "settlePlan": 0,
+      "triggerProtect": "0.0200",
+      "liquidationFee": "0.025000",
+      "marketTakeBound": "0.02",
+      "createTime": 1752580954388,
+      "filters": [
+        {
+          "minPrice": "0.010000",
+          "maxPrice": "2000",
+          "filterType": "PRICE_FILTER",
+          "tickSize": "0.010000"
+        },
+        {
+          "stepSize": "0.01",
+          "filterType": "LOT_SIZE",
+          "maxQty": "100000",
+          "minQty": "0.01"
+        },
+        {
+          "stepSize": "0.01",
+          "filterType": "MARKET_LOT_SIZE",
+          "maxQty": "10",
+          "minQty": "0.01"
+        },
+        {
+          "limit": 200,
+          "filterType": "MAX_NUM_ORDERS"
+        },
+        {
+          "limit": 10,
+          "filterType": "MAX_NUM_ALGO_ORDERS"
+        },
+        {
+          "notional": "5",
+          "filterType": "MIN_NOTIONAL"
+        },
+        {
+          "multiplierDown": "0.9800",
+          "multiplierUp": "1.0200",
+          "ltMultiplierDown": "0.9800",
+          "multiplierDecimal": "4",
+          "filterType": "PERCENT_PRICE",
+          "ltMultiplierUp": "1.0200"
+        }
+      ],
+      "orderTypes": [
+        "LIMIT",
+        "MARKET",
+        "STOP",
+        "STOP_MARKET",
+        "TAKE_PROFIT",
+        "TAKE_PROFIT_MARKET",
+        "TRAILING_STOP_MARKET"
+      ],
+      "timeInForce": [
+        "GTC",
+        "IOC",
+        "FOK",
+        "GTX",
+        "RPI",
+        "HIDDEN"
+      ]
+    },
+    {
+      "symbol": "AMZNUSDT",
+      "pair": "AMZNUSDT",
+      "contractType": "PERPETUAL",
+      "deliveryDate": 4133404800000,
+      "onboardDate": 1752562800000,
+      "status": "TRADING",
+      "maintMarginPercent": "2.5000",
+      "requiredMarginPercent": "5.0000",
+      "baseAsset": "AMZN",
+      "quoteAsset": "USDT",
+      "marginAsset": "USDT",
+      "pricePrecision": 6,
+      "quantityPrecision": 2,
+      "baseAssetPrecision": 8,
+      "quotePrecision": 8,
+      "underlyingType": "COIN",
+      "underlyingSubType": [
+        "STOCK"
+      ],
+      "symbolType": 1,
+      "tradingMode": 0,
+      "name": "Amazon.com Inc.",
+      "channel": "nasdaq",
+      "sequenceNo": 0,
+      "settlePlan": 0,
+      "triggerProtect": "0.0200",
+      "liquidationFee": "0.025000",
+      "marketTakeBound": "0.02",
+      "createTime": 1752581084331,
+      "filters": [
+        {
+          "minPrice": "0.010000",
+          "maxPrice": "2000",
+          "filterType": "PRICE_FILTER",
+          "tickSize": "0.010000"
+        },
+        {
+          "stepSize": "0.01",
+          "filterType": "LOT_SIZE",
+          "maxQty": "100000",
+          "minQty": "0.01"
+        },
+        {
+          "stepSize": "0.01",
+          "filterType": "MARKET_LOT_SIZE",
+          "maxQty": "10",
+          "minQty": "0.01"
+        },
+        {
+          "limit": 200,
+          "filterType": "MAX_NUM_ORDERS"
+        },
+        {
+          "limit": 10,
+          "filterType": "MAX_NUM_ALGO_ORDERS"
+        },
+        {
+          "notional": "5",
+          "filterType": "MIN_NOTIONAL"
+        },
+        {
+          "multiplierDown": "0.9800",
+          "multiplierUp": "1.0200",
+          "ltMultiplierDown": "0.9800",
+          "multiplierDecimal": "4",
+          "filterType": "PERCENT_PRICE",
+          "ltMultiplierUp": "1.0200"
+        }
+      ],
+      "orderTypes": [
+        "LIMIT",
+        "MARKET",
+        "STOP",
+        "STOP_MARKET",
+        "TAKE_PROFIT",
+        "TAKE_PROFIT_MARKET",
+        "TRAILING_STOP_MARKET"
+      ],
+      "timeInForce": [
+        "GTC",
+        "IOC",
+        "FOK",
+        "GTX",
+        "RPI",
+        "HIDDEN"
+      ]
+    },
+    {
+      "symbol": "METAUSDT",
+      "pair": "METAUSDT",
+      "contractType": "PERPETUAL",
+      "deliveryDate": 4133404800000,
+      "onboardDate": 1752562800000,
+      "status": "TRADING",
+      "maintMarginPercent": "2.5000",
+      "requiredMarginPercent": "5.0000",
+      "baseAsset": "META",
+      "quoteAsset": "USDT",
+      "marginAsset": "USDT",
+      "pricePrecision": 6,
+      "quantityPrecision": 2,
+      "baseAssetPrecision": 8,
+      "quotePrecision": 8,
+      "underlyingType": "COIN",
+      "underlyingSubType": [
+        "STOCK"
+      ],
+      "symbolType": 1,
+      "tradingMode": 0,
+      "name": "Meta Platforms Inc.",
+      "channel": "nasdaq",
+      "sequenceNo": 0,
+      "settlePlan": 0,
+      "triggerProtect": "0.0200",
+      "liquidationFee": "0.025000",
+      "marketTakeBound": "0.02",
+      "createTime": 1752581217203,
+      "filters": [
+        {
+          "minPrice": "0.010000",
+          "maxPrice": "3000",
+          "filterType": "PRICE_FILTER",
+          "tickSize": "0.010000"
+        },
+        {
+          "stepSize": "0.01",
+          "filterType": "LOT_SIZE",
+          "maxQty": "100000",
+          "minQty": "0.01"
+        },
+        {
+          "stepSize": "0.01",
+          "filterType": "MARKET_LOT_SIZE",
+          "maxQty": "3",
+          "minQty": "0.01"
+        },
+        {
+          "limit": 200,
+          "filterType": "MAX_NUM_ORDERS"
+        },
+        {
+          "limit": 10,
+          "filterType": "MAX_NUM_ALGO_ORDERS"
+        },
+        {
+          "notional": "5",
+          "filterType": "MIN_NOTIONAL"
+        },
+        {
+          "multiplierDown": "0.9800",
+          "multiplierUp": "1.0200",
+          "ltMultiplierDown": "0.9800",
+          "multiplierDecimal": "4",
+          "filterType": "PERCENT_PRICE",
+          "ltMultiplierUp": "1.0200"
+        }
+      ],
+      "orderTypes": [
+        "LIMIT",
+        "MARKET",
+        "STOP",
+        "STOP_MARKET",
+        "TAKE_PROFIT",
+        "TAKE_PROFIT_MARKET",
+        "TRAILING_STOP_MARKET"
+      ],
+      "timeInForce": [
+        "GTC",
+        "IOC",
+        "FOK",
+        "GTX",
+        "RPI",
+        "HIDDEN"
+      ]
+    },
+    {
+      "symbol": "GOOGUSDT",
+      "pair": "GOOGUSDT",
+      "contractType": "PERPETUAL",
+      "deliveryDate": 4133404800000,
+      "onboardDate": 1752562800000,
+      "status": "TRADING",
+      "maintMarginPercent": "2.5000",
+      "requiredMarginPercent": "5.0000",
+      "baseAsset": "GOOG",
+      "quoteAsset": "USDT",
+      "marginAsset": "USDT",
+      "pricePrecision": 6,
+      "quantityPrecision": 2,
+      "baseAssetPrecision": 8,
+      "quotePrecision": 8,
+      "underlyingType": "COIN",
+      "underlyingSubType": [
+        "STOCK"
+      ],
+      "symbolType": 1,
+      "tradingMode": 0,
+      "name": "Alphabet Inc.",
+      "channel": "nasdaq",
+      "sequenceNo": 0,
+      "settlePlan": 0,
+      "triggerProtect": "0.0200",
+      "liquidationFee": "0.025000",
+      "marketTakeBound": "0.02",
+      "createTime": 1752581693002,
+      "filters": [
+        {
+          "minPrice": "0.010000",
+          "maxPrice": "2000",
+          "filterType": "PRICE_FILTER",
+          "tickSize": "0.010000"
+        },
+        {
+          "stepSize": "0.01",
+          "filterType": "LOT_SIZE",
+          "maxQty": "100000",
+          "minQty": "0.01"
+        },
+        {
+          "stepSize": "0.01",
+          "filterType": "MARKET_LOT_SIZE",
+          "maxQty": "10",
+          "minQty": "0.01"
+        },
+        {
+          "limit": 200,
+          "filterType": "MAX_NUM_ORDERS"
+        },
+        {
+          "limit": 10,
+          "filterType": "MAX_NUM_ALGO_ORDERS"
+        },
+        {
+          "notional": "5",
+          "filterType": "MIN_NOTIONAL"
+        },
+        {
+          "multiplierDown": "0.9800",
+          "multiplierUp": "1.0200",
+          "ltMultiplierDown": "0.9800",
+          "multiplierDecimal": "4",
+          "filterType": "PERCENT_PRICE",
+          "ltMultiplierUp": "1.0200"
+        }
+      ],
+      "orderTypes": [
+        "LIMIT",
+        "MARKET",
+        "STOP",
+        "STOP_MARKET",
+        "TAKE_PROFIT",
+        "TAKE_PROFIT_MARKET",
+        "TRAILING_STOP_MARKET"
+      ],
+      "timeInForce": [
+        "GTC",
+        "IOC",
+        "FOK",
+        "GTX",
+        "RPI",
+        "HIDDEN"
+      ]
+    },
+    {
+      "symbol": "MSFTUSDT",
+      "pair": "MSFTUSDT",
+      "contractType": "PERPETUAL",
+      "deliveryDate": 4133404800000,
+      "onboardDate": 1752562800000,
+      "status": "TRADING",
+      "maintMarginPercent": "2.5000",
+      "requiredMarginPercent": "5.0000",
+      "baseAsset": "MSFT",
+      "quoteAsset": "USDT",
+      "marginAsset": "USDT",
+      "pricePrecision": 6,
+      "quantityPrecision": 2,
+      "baseAssetPrecision": 8,
+      "quotePrecision": 8,
+      "underlyingType": "COIN",
+      "underlyingSubType": [
+        "STOCK"
+      ],
+      "symbolType": 1,
+      "tradingMode": 0,
+      "name": "Microsoft Corporation",
+      "channel": "nasdaq",
+      "sequenceNo": 0,
+      "settlePlan": 0,
+      "triggerProtect": "0.0200",
+      "liquidationFee": "0.025000",
+      "marketTakeBound": "0.02",
+      "createTime": 1752581791387,
+      "filters": [
+        {
+          "minPrice": "0.010000",
+          "maxPrice": "3000",
+          "filterType": "PRICE_FILTER",
+          "tickSize": "0.010000"
+        },
+        {
+          "stepSize": "0.01",
+          "filterType": "LOT_SIZE",
+          "maxQty": "100000",
+          "minQty": "0.01"
+        },
+        {
+          "stepSize": "0.01",
+          "filterType": "MARKET_LOT_SIZE",
+          "maxQty": "3",
+          "minQty": "0.01"
+        },
+        {
+          "limit": 200,
+          "filterType": "MAX_NUM_ORDERS"
+        },
+        {
+          "limit": 10,
+          "filterType": "MAX_NUM_ALGO_ORDERS"
+        },
+        {
+          "notional": "5",
+          "filterType": "MIN_NOTIONAL"
+        },
+        {
+          "multiplierDown": "0.9800",
+          "multiplierUp": "1.0200",
+          "ltMultiplierDown": "0.9800",
+          "multiplierDecimal": "4",
+          "filterType": "PERCENT_PRICE",
+          "ltMultiplierUp": "1.0200"
+        }
+      ],
+      "orderTypes": [
+        "LIMIT",
+        "MARKET",
+        "STOP",
+        "STOP_MARKET",
+        "TAKE_PROFIT",
+        "TAKE_PROFIT_MARKET",
+        "TRAILING_STOP_MARKET"
+      ],
+      "timeInForce": [
+        "GTC",
+        "IOC",
+        "FOK",
+        "GTX",
+        "RPI",
+        "HIDDEN"
+      ]
+    },
+    {
+      "symbol": "SBETUSDT",
+      "pair": "SBETUSDT",
+      "contractType": "PERPETUAL",
+      "deliveryDate": 4133404800000,
+      "onboardDate": 1753167600000,
+      "status": "TRADING",
+      "maintMarginPercent": "2.5000",
+      "requiredMarginPercent": "5.0000",
+      "baseAsset": "SBET",
+      "quoteAsset": "USDT",
+      "marginAsset": "USDT",
+      "pricePrecision": 6,
+      "quantityPrecision": 2,
+      "baseAssetPrecision": 8,
+      "quotePrecision": 8,
+      "underlyingType": "COIN",
+      "underlyingSubType": [
+        "STOCK"
+      ],
+      "symbolType": 1,
+      "tradingMode": 0,
+      "name": "Sharplink Gaming Inc.",
+      "channel": "nasdaq",
+      "sequenceNo": 0,
+      "settlePlan": 0,
+      "triggerProtect": "0.0200",
+      "liquidationFee": "0.025000",
+      "marketTakeBound": "0.02",
+      "createTime": 1753185658102,
+      "filters": [
+        {
+          "minPrice": "0.010000",
+          "maxPrice": "2000",
+          "filterType": "PRICE_FILTER",
+          "tickSize": "0.010000"
+        },
+        {
+          "stepSize": "0.01",
+          "filterType": "LOT_SIZE",
+          "maxQty": "1000000",
+          "minQty": "0.01"
+        },
+        {
+          "stepSize": "0.01",
+          "filterType": "MARKET_LOT_SIZE",
+          "maxQty": "200",
+          "minQty": "0.01"
+        },
+        {
+          "limit": 200,
+          "filterType": "MAX_NUM_ORDERS"
+        },
+        {
+          "limit": 10,
+          "filterType": "MAX_NUM_ALGO_ORDERS"
+        },
+        {
+          "notional": "5",
+          "filterType": "MIN_NOTIONAL"
+        },
+        {
+          "multiplierDown": "0.9800",
+          "multiplierUp": "1.0200",
+          "ltMultiplierDown": "0.9800",
+          "multiplierDecimal": "4",
+          "filterType": "PERCENT_PRICE",
+          "ltMultiplierUp": "1.0200"
+        }
+      ],
+      "orderTypes": [
+        "LIMIT",
+        "MARKET",
+        "STOP",
+        "STOP_MARKET",
+        "TAKE_PROFIT",
+        "TAKE_PROFIT_MARKET",
+        "TRAILING_STOP_MARKET"
+      ],
+      "timeInForce": [
+        "GTC",
+        "IOC",
+        "FOK",
+        "GTX",
+        "RPI",
+        "HIDDEN"
+      ]
+    },
+    {
+      "symbol": "QQQUSDT",
+      "pair": "QQQUSDT",
+      "contractType": "PERPETUAL",
+      "deliveryDate": 4133404800000,
+      "onboardDate": 1757574000000,
+      "status": "TRADING",
+      "maintMarginPercent": "2.5000",
+      "requiredMarginPercent": "5.0000",
+      "baseAsset": "QQQ",
+      "quoteAsset": "USDT",
+      "marginAsset": "USDT",
+      "pricePrecision": 6,
+      "quantityPrecision": 2,
+      "baseAssetPrecision": 8,
+      "quotePrecision": 8,
+      "underlyingType": "COIN",
+      "underlyingSubType": [
+        "STOCK"
+      ],
+      "symbolType": 1,
+      "tradingMode": 0,
+      "name": "Invesco QQQ Trust",
+      "channel": "nasdaq",
+      "sequenceNo": 0,
+      "settlePlan": 0,
+      "triggerProtect": "0.0200",
+      "liquidationFee": "0.025000",
+      "marketTakeBound": "0.02",
+      "createTime": 1757596466790,
+      "filters": [
+        {
+          "minPrice": "0.010000",
+          "maxPrice": "2000",
+          "filterType": "PRICE_FILTER",
+          "tickSize": "0.010000"
+        },
+        {
+          "stepSize": "0.01",
+          "filterType": "LOT_SIZE",
+          "maxQty": "10000000",
+          "minQty": "0.01"
+        },
+        {
+          "stepSize": "0.01",
+          "filterType": "MARKET_LOT_SIZE",
+          "maxQty": "5",
+          "minQty": "0.01"
+        },
+        {
+          "limit": 200,
+          "filterType": "MAX_NUM_ORDERS"
+        },
+        {
+          "limit": 10,
+          "filterType": "MAX_NUM_ALGO_ORDERS"
+        },
+        {
+          "notional": "5",
+          "filterType": "MIN_NOTIONAL"
+        },
+        {
+          "multiplierDown": "0.9800",
+          "multiplierUp": "1.0200",
+          "ltMultiplierDown": "0.9800",
+          "multiplierDecimal": "4",
+          "filterType": "PERCENT_PRICE",
+          "ltMultiplierUp": "1.0200"
+        }
+      ],
+      "orderTypes": [
+        "LIMIT",
+        "MARKET",
+        "STOP",
+        "STOP_MARKET",
+        "TAKE_PROFIT",
+        "TAKE_PROFIT_MARKET",
+        "TRAILING_STOP_MARKET"
+      ],
+      "timeInForce": [
+        "GTC",
+        "IOC",
+        "FOK",
+        "GTX",
+        "RPI",
+        "HIDDEN"
+      ]
+    }
+  ]
+}

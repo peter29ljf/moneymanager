@@ -504,11 +504,11 @@ class BitgetAPI:
         # 如果都没有找到，抛出错误
         raise ValueError(f"未找到币种: {coin}. 请使用完整的交易对符号（如BTCUSDT）或确保合约信息已加载")
     
-    def place_market_order(self, coin: str, side: str, size: str, 
-                          margin_mode: str = "isolated", leverage: str = "1") -> Dict[str, Any]:
+    def place_market_order(self, coin: str, side: str, size: str,
+                          margin_mode: str = "crossed", leverage: str = "1") -> Dict[str, Any]:
         """
-        下市价单
-        
+        下市价单（统一账户 V3）
+
         Args:
             coin: 币种 (如 BTC, ETH 或 BTCUSDT)
             side: 方向 (buy/sell)
@@ -517,125 +517,97 @@ class BitgetAPI:
             leverage: 杠杆倍数 (1-125)
         """
         symbol = self._get_symbol(coin)
-        product_type = "SUSDT-FUTURES" if self.sandbox else "USDT-FUTURES"
-        
+
         order_data = {
-            "symbol": symbol,
-            "productType": product_type,
-            "marginMode": margin_mode,
-            "marginCoin": "USDT",
-            "size": str(size),
-            "side": side,
-            "orderType": "market",
-            "clientOid": f"market_{int(time.time() * 1000)}_{random.randint(1000, 9999)}"
+            "category":    "USDT-FUTURES",
+            "symbol":      symbol,
+            "orderType":   "market",
+            "side":        side,
+            "qty":         str(size),
+            "marginMode":  margin_mode,
+            "timeInForce": "ioc",
+            "clientOid":   f"market_{int(time.time() * 1000)}_{random.randint(1000, 9999)}"
         }
-        
-        # 设置保证金模式和杠杆倍数
-        if margin_mode == "isolated":
-            print(f"🔄 设置 {symbol} 为逐仓模式...")
-            self._set_margin_mode(symbol, margin_mode)
-            
+
         if leverage != "1":
             print(f"🔄 设置 {symbol} 杠杆为 {leverage}x...")
             self._set_leverage(symbol, margin_mode, leverage)
-        
-        return self._make_request("POST", "/api/v2/mix/order/place-order", order_data)
+
+        return self._make_request("POST", "/api/v3/trade/place-order", order_data)
     
-    def place_market_order_with_contract_info(self, symbol: str, side: str, size: str, 
+    def place_market_order_with_contract_info(self, symbol: str, side: str, size: str,
                                             contract_info: Optional[Dict[str, Any]] = None,
-                                            margin_mode: str = "isolated", leverage: str = "1") -> Dict[str, Any]:
+                                            margin_mode: str = "crossed", leverage: str = "1") -> Dict[str, Any]:
         """
-        使用合约信息下市价单（推荐使用此方法）
-        
+        使用合约信息下市价单（推荐使用此方法，统一账户 V3）
+
         Args:
-            symbol: 完整的交易对符号 (如 BTCUSDT_UMCBL)
+            symbol: 完整的交易对符号 (如 BTCUSDT)
             side: 方向 (buy/sell)
             size: 数量
             contract_info: 合约信息（如果提供则不需要查询）
             margin_mode: 保证金模式 (crossed/isolated)
             leverage: 杠杆倍数 (1-125)
         """
-        product_type = "SUSDT-FUTURES" if self.sandbox else "USDT-FUTURES"
-        
         # 获取合约信息
         if contract_info is None:
             contract_info = self.get_contract_info(symbol)
             if not contract_info:
                 raise ValueError(f"未找到交易对 {symbol} 的合约信息")
-        
+
         # 验证数量精度
         volume_place = int(contract_info.get('volumePlace', 0))
         min_trade_num = float(contract_info.get('minTradeNum', '0'))
-        
+
         try:
             size_float = float(size)
             if size_float < min_trade_num:
                 raise ValueError(f"数量 {size} 小于最小交易数量 {min_trade_num}")
-            
+
             # 调整精度
             if volume_place > 0:
                 size = f"{size_float:.{volume_place}f}"
             else:
                 size = str(int(size_float) if size_float == int(size_float) else size_float)
-                
+
         except ValueError as e:
             raise ValueError(f"无效的数量格式: {size}")
-        
+
         order_data = {
-            "symbol": symbol,
-            "productType": product_type,
-            "marginMode": margin_mode,
-            "marginCoin": "USDT",
-            "size": size,
-            "side": side,
-            "orderType": "market",
-            "clientOid": f"market_{int(time.time() * 1000)}_{random.randint(1000, 9999)}"
+            "category":    "USDT-FUTURES",
+            "symbol":      symbol,
+            "orderType":   "market",
+            "side":        side,
+            "qty":         size,
+            "marginMode":  margin_mode,
+            "timeInForce": "ioc",
+            "clientOid":   f"market_{int(time.time() * 1000)}_{random.randint(1000, 9999)}"
         }
-        
-        # 设置保证金模式和杠杆倍数
-        if margin_mode == "isolated":
-            print(f"🔄 设置 {symbol} 为逐仓模式...")
-            self._set_margin_mode(symbol, margin_mode)
-            
+
         if leverage != "1":
             print(f"🔄 设置 {symbol} 杠杆为 {leverage}x...")
             self._set_leverage(symbol, margin_mode, leverage)
-        
+
         print(f"📊 合约信息: {contract_info.get('baseCoin', '')}/{contract_info.get('quoteCoin', '')} - 最小数量: {min_trade_num}")
-        
-        return self._make_request("POST", "/api/v2/mix/order/place-order", order_data)
+
+        return self._make_request("POST", "/api/v3/trade/place-order", order_data)
     
     def _set_leverage(self, symbol: str, margin_mode: str, leverage: str) -> Dict[str, Any]:
-        """设置杠杆倍数"""
-        product_type = "SUSDT-FUTURES" if self.sandbox else "USDT-FUTURES"
-        
+        """设置杠杆倍数（统一账户 V3）"""
         leverage_data = {
-            "symbol": symbol,
-            "productType": product_type,
+            "category":   "USDT-FUTURES",
+            "symbol":     symbol,
             "marginMode": margin_mode,
-            "leverage": str(leverage)
+            "leverage":   str(leverage)
         }
-        
-        return self._make_request("POST", "/api/v2/mix/account/set-leverage", leverage_data)
-    
-    def _set_margin_mode(self, symbol: str, margin_mode: str) -> Dict[str, Any]:
-        """设置保证金模式"""
-        product_type = "SUSDT-FUTURES" if self.sandbox else "USDT-FUTURES"
-        
-        margin_data = {
-            "symbol": symbol,
-            "productType": product_type,
-            "marginMode": margin_mode
-        }
-        
-        return self._make_request("POST", "/api/v2/mix/account/set-margin-mode", margin_data)
+        return self._make_request("POST", "/api/v3/account/set-leverage", leverage_data)
     
     def place_limit_order(self, coin: str, side: str, size: str, price: str,
-                         margin_mode: str = "isolated", 
+                         margin_mode: str = "crossed",
                          force: str = "gtc") -> Dict[str, Any]:
         """
-        下限价单
-        
+        下限价单（统一账户 V3）
+
         Args:
             coin: 币种 (如 BTC, ETH 或 BTCUSDT)
             side: 方向 (buy/sell)
@@ -645,56 +617,53 @@ class BitgetAPI:
             force: 订单有效期 (gtc/ioc/fok/post_only)
         """
         symbol = self._get_symbol(coin)
-        product_type = "SUSDT-FUTURES" if self.sandbox else "USDT-FUTURES"
-        
+
         order_data = {
-            "symbol": symbol,
-            "productType": product_type,
-            "marginMode": margin_mode,
-            "marginCoin": "USDT",
-            "size": str(size),
-            "price": str(price),
-            "side": side,
-            "tradeSide": "open",
-            "orderType": "limit",
-            "force": force,
-            "clientOid": f"limit_{int(time.time() * 1000)}_{random.randint(1000, 9999)}"
+            "category":    "USDT-FUTURES",
+            "symbol":      symbol,
+            "orderType":   "limit",
+            "side":        side,
+            "qty":         str(size),
+            "price":       str(price),
+            "marginMode":  margin_mode,
+            "timeInForce": force,
+            "clientOid":   f"limit_{int(time.time() * 1000)}_{random.randint(1000, 9999)}"
         }
-        
-        return self._make_request("POST", "/api/v2/mix/order/place-order", order_data)
+
+        return self._make_request("POST", "/api/v3/trade/place-order", order_data)
     
     def close_position(self, coin: str, side: str, size: str,
-                      order_type: str = "market", price: Optional[str] = None) -> Dict[str, Any]:
+                      order_type: str = "market", price: Optional[str] = None,
+                      margin_mode: str = "crossed") -> Dict[str, Any]:
         """
-        平仓
-        
+        平仓（统一账户 V3，reduceOnly=yes）
+
         Args:
             coin: 币种
-            side: 平仓方向 (buy/sell) 
+            side: 平仓方向 (buy/sell)
             size: 平仓数量
             order_type: 订单类型 (market/limit)
             price: 限价单价格(仅限价单需要)
+            margin_mode: 保证金模式 (crossed/isolated)
         """
         symbol = self._get_symbol(coin)
-        product_type = "SUSDT-FUTURES" if self.sandbox else "USDT-FUTURES"
-        
+
         order_data = {
-            "symbol": symbol,
-            "productType": product_type,
-            "marginMode": "isolated",
-            "marginCoin": "USDT",
-            "size": str(size),
-            "side": side,
-            "tradeSide": "close",  # 平仓
-            "orderType": order_type,
-            "clientOid": f"close_{int(time.time() * 1000)}_{random.randint(1000, 9999)}"
+            "category":    "USDT-FUTURES",
+            "symbol":      symbol,
+            "orderType":   order_type,
+            "side":        side,
+            "qty":         str(size),
+            "marginMode":  margin_mode,
+            "reduceOnly":  "yes",
+            "timeInForce": "ioc" if order_type == "market" else "gtc",
+            "clientOid":   f"close_{int(time.time() * 1000)}_{random.randint(1000, 9999)}"
         }
-        
+
         if order_type == "limit" and price:
             order_data["price"] = str(price)
-            order_data["force"] = "gtc"
-        
-        return self._make_request("POST", "/api/v2/mix/order/place-order", order_data)
+
+        return self._make_request("POST", "/api/v3/trade/place-order", order_data)
     
     def get_ticker_price(self, coin: str) -> Dict[str, Any]:
         """
